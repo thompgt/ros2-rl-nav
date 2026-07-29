@@ -1,0 +1,16 @@
+# The build context only needs docker/entrypoint.sh -- everything else is
+# bind-mounted at run time. Keeping colcon output and training artifacts out of
+# the context makes rebuilds fast.
+.git
+build/
+install/
+log/
+runs/
+checkpoints/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.onnx
+*.pt
+*.zip
