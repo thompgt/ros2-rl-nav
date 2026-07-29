@@ -21,6 +21,12 @@ BEAM_POOL = N_RAW_BEAMS // N_BEAMS  # 18
 LIDAR_MAX = 10.0
 """Metres. Must match ``<range><max>`` in models/diffbot."""
 
+LIDAR_OFFSET_X = 0.15
+"""Metres forward of the robot origin. Must match the sensor ``<pose>`` in
+models/diffbot. Reset sampling needs it: clearance is measured from the robot
+*origin*, but collision is measured from the *sensor*, and the sensor is closer
+to whatever is in front."""
+
 # --- Observation -------------------------------------------------------------
 OBS_DIM = 26
 """20 pooled beams + goal distance + bearing sin/cos + prev action (2) + step."""
@@ -49,6 +55,15 @@ SIM_STEPS_PER_ACTION = 50
 
 STEP_DURATION = PHYSICS_STEP_SIZE * SIM_STEPS_PER_ACTION  # 0.05 s
 """Seconds of sim time per env step. Exactly this, always. Tested."""
+
+STEP_DURATION_NS = 50_000_000
+"""``STEP_DURATION`` in integer nanoseconds.
+
+Sim-time targets are accumulated in integer nanoseconds, never in float
+seconds. ``target += 0.05`` five hundred times accumulates float error, and the
+error only has to exceed the sensor stamp by one ULP for ``get_obs`` to wait for
+a sample that will never come and time out on the last step of long episodes --
+a bug that reproduces once every few thousand steps and looks like flakiness."""
 
 CONTROL_HZ = 1.0 / STEP_DURATION  # 20 Hz
 """Implied control rate; the deployment node's timer runs at this rate."""
@@ -83,6 +98,19 @@ MIN_OBSTACLE_CLEARANCE = 0.4
 
 MIN_START_GOAL_DISTANCE = 1.0
 """Metres. An already-solved episode teaches nothing."""
+
+MAX_SAMPLE_ATTEMPTS = 1000
+"""Rejection-sampling attempts before raising.
+
+It raises rather than relaxing the clearance, because exhausting 1000 attempts
+means the arena or the clearance changed such that free space is gone -- and a
+silently relaxed clearance produces episodes that start in collision, which
+reads as "the policy cannot learn" rather than as the configuration error it
+is."""
+
+ROBOT_SPAWN_Z = 0.06
+"""Metres. Teleport height, matching the ``<include>`` pose in worlds/arena.sdf.
+Spawning at z=0 drops the wheels through the ground plane."""
 
 # --- Simulation plumbing -----------------------------------------------------
 WORLD_NAME = "arena"
