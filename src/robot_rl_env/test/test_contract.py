@@ -84,7 +84,9 @@ def test_lidar_beam_count_and_range_match_contract():
     assert samples, "model.sdf declares no <samples>"
     assert int(samples[0]) == contract.N_RAW_BEAMS
 
-    ray = next(root.iter("lidar"), None) or next(root.iter("ray"), None)
+    ray = next(root.iter("lidar"), None)
+    if ray is None:
+        ray = next(root.iter("ray"), None)
     assert ray is not None, "model.sdf has no lidar/ray sensor"
     max_range = next(ray.iter("max"))
     assert float(max_range.text) == pytest.approx(contract.LIDAR_MAX)

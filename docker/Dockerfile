@@ -1,10 +1,17 @@
 # ROS 2 Jazzy + Gazebo Harmonic + Gymnasium/SB3.
 #
-# Jazzy's official binaries target Gazebo Harmonic, so `ros-jazzy-ros-gz` pulls
-# the correct gz-sim8 stack from the ROS repos directly. Do NOT add the OSRF
-# packages.osrfoundation.org repo on top of this: mixing it with the ROS repo
-# gives you two copies of gz-transport and a link-time failure that is
-# genuinely miserable to diagnose.
+# Jazzy ships Gazebo Harmonic as ROS *vendor* packages
+# (ros-jazzy-gz-sim-vendor, ros-jazzy-gz-tools-vendor, ...), pulled in by
+# `ros-jazzy-ros-gz`. There is no `gz-harmonic` deb in packages.ros.org --
+# that name exists only in the OSRF repo, and installing it is exit code 100.
+#
+# Do NOT add packages.osrfoundation.org to fix that. Mixing the OSRF debs with
+# the vendored ones gives you two copies of gz-transport and a link-time
+# failure that is genuinely miserable to diagnose.
+#
+# The `gz` CLI comes from the vendor package and lands on PATH at
+# /opt/ros/jazzy/opt/gz_tools_vendor/bin/gz once /opt/ros/jazzy/setup.bash is
+# sourced -- which is why entrypoint.sh sources it before exec'ing anything.
 FROM ros:jazzy-ros-base
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -26,7 +33,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-ros-gz-interfaces \
       ros-jazzy-teleop-twist-keyboard \
       ros-jazzy-rmw-cyclonedds-cpp \
-      gz-harmonic \
     && rm -rf /var/lib/apt/lists/*
 
 # --- python RL stack ---------------------------------------------------------

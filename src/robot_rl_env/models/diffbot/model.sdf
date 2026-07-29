@@ -10,7 +10,7 @@
   satisfiable, a sensor sample must land *exactly* on 50 ms boundaries.
 
   At 20 Hz (period 50 ms) with a 1 ms physics step, samples land at
-  0, 50, 100, ... ms -- precisely the step boundaries. Good.
+  0, 50, 100, ... ms - precisely the step boundaries. Good.
 
   At 50 Hz they would land at 0, 20, 40, 60 ... ms, and the sample at or after
   the 50 ms target is the one at 60 ms, which requires 10 ms of sim time that

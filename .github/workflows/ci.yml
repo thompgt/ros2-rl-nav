@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Fast path: lint + the contract tests. No simulator, no Docker build.
+  # These are the tests that catch a contract/SDF divergence, and they finish
+  # in seconds.
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pip install pytest pytest-timeout ruff numpy
+
+      - name: Lint
+        run: ruff check src scripts
+
+      - name: Contract tests
+        # Run from the package root so `from robot_rl_env import contract`
+        # resolves without a colcon install.
+        working-directory: src/robot_rl_env
+        run: python -m pytest test -v
+
+  # Slow path: build the ROS 2 Jazzy + Gazebo Harmonic image. Does not run the
+  # simulator (GitHub runners have no GPU for ogre2), only proves the image
+  # still builds.
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -f docker/Dockerfile -t ros2-rl-nav:ci .

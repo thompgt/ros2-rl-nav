@@ -5,12 +5,12 @@
   Two things in here are load-bearing for the RL loop and must not be changed
   casually:
 
-  1. <max_step_size>0.001</max_step_size> -- contract.PHYSICS_STEP_SIZE. The env
+  1. <max_step_size>0.001</max_step_size> - contract.PHYSICS_STEP_SIZE. The env
      advances exactly 50 iterations per step() to get exactly 50 ms of sim time.
      Changing this silently changes the action duration the policy was trained
      with. test_world_physics_step_matches_contract guards it.
 
-  2. gz-sim-user-commands-system -- this plugin is what provides the
+  2. gz-sim-user-commands-system - this plugin is what provides the
      /world/arena/control and /world/arena/set_pose services. Without it the
      services simply do not exist, the bridge reports nothing, and every step()
      hangs. This is the classic "silence, not errors" failure.
@@ -84,7 +84,7 @@
     </model>
 
     <!-- ================= perimeter walls =================
-         10 x 10 m interior, 0.2 m thick, 0.6 m tall -- well above the
+         10 x 10 m interior, 0.2 m thick, 0.6 m tall - well above the
          0.15 m LiDAR mounting height so beams always hit them. -->
     <model name="wall_north">
       <static>true</static>
@@ -144,7 +144,7 @@
 
     <!-- ================= obstacles =================
          Keep this list in sync with OBSTACLES in
-         robot_rl_env/reset_sampling (Phase 2c) -- free-space rejection
+         robot_rl_env/reset_sampling (Phase 2c) - free-space rejection
          sampling reads the same geometry. -->
 
     <model name="obstacle_box_1">
