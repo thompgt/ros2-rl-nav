@@ -1,0 +1,242 @@
+<?xml version="1.0" ?>
+<!--
+  10 x 10 m walled arena with 7 static obstacles.
+
+  Two things in here are load-bearing for the RL loop and must not be changed
+  casually:
+
+  1. <max_step_size>0.001</max_step_size> -- contract.PHYSICS_STEP_SIZE. The env
+     advances exactly 50 iterations per step() to get exactly 50 ms of sim time.
+     Changing this silently changes the action duration the policy was trained
+     with. test_world_physics_step_matches_contract guards it.
+
+  2. gz-sim-user-commands-system -- this plugin is what provides the
+     /world/arena/control and /world/arena/set_pose services. Without it the
+     services simply do not exist, the bridge reports nothing, and every step()
+     hangs. This is the classic "silence, not errors" failure.
+
+  Obstacle placement leaves the arena connected: no obstacle is within 1.2 m of
+  another or of a wall, so there is always a navigable corridor and reset
+  sampling with a 0.4 m clearance always terminates.
+-->
+<sdf version="1.9">
+  <world name="arena">
+
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <!-- Unlimited: throughput is bounded by how fast we can step, never by
+           wall-clock. In step-synchronized mode real_time_factor is
+           meaningless; in Phase 4 the launch file overrides it to 1.0. -->
+      <real_time_factor>0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu"/>
+
+    <gravity>0 0 -9.8</gravity>
+
+    <scene>
+      <ambient>0.6 0.6 0.6 1</ambient>
+      <background>0.7 0.8 0.9 1</background>
+      <grid>false</grid>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.9 0.9 0.9 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.3 -0.9</direction>
+    </light>
+
+    <!-- ================= ground ================= -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <surface>
+            <friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction>
+          </surface>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <plane><normal>0 0 1</normal><size>100 100</size></plane>
+          </geometry>
+          <material>
+            <ambient>0.4 0.4 0.4 1</ambient>
+            <diffuse>0.5 0.5 0.5 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ================= perimeter walls =================
+         10 x 10 m interior, 0.2 m thick, 0.6 m tall -- well above the
+         0.15 m LiDAR mounting height so beams always hit them. -->
+    <model name="wall_north">
+      <static>true</static>
+      <pose>0 5.1 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>10.4 0.2 0.6</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>10.4 0.2 0.6</size></box></geometry>
+          <material><ambient>0.3 0.3 0.35 1</ambient><diffuse>0.4 0.4 0.45 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_south">
+      <static>true</static>
+      <pose>0 -5.1 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>10.4 0.2 0.6</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>10.4 0.2 0.6</size></box></geometry>
+          <material><ambient>0.3 0.3 0.35 1</ambient><diffuse>0.4 0.4 0.45 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_east">
+      <static>true</static>
+      <pose>5.1 0 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 10.0 0.6</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 10.0 0.6</size></box></geometry>
+          <material><ambient>0.3 0.3 0.35 1</ambient><diffuse>0.4 0.4 0.45 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_west">
+      <static>true</static>
+      <pose>-5.1 0 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry><box><size>0.2 10.0 0.6</size></box></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><box><size>0.2 10.0 0.6</size></box></geometry>
+          <material><ambient>0.3 0.3 0.35 1</ambient><diffuse>0.4 0.4 0.45 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ================= obstacles =================
+         Keep this list in sync with OBSTACLES in
+         robot_rl_env/reset_sampling (Phase 2c) -- free-space rejection
+         sampling reads the same geometry. -->
+
+    <model name="obstacle_box_1">
+      <static>true</static>
+      <pose>-2.8 2.6 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.8 0.8 0.6</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.8 0.8 0.6</size></box></geometry>
+          <material><ambient>0.6 0.25 0.2 1</ambient><diffuse>0.75 0.3 0.25 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_box_2">
+      <static>true</static>
+      <pose>2.4 3.2 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.2 0.6 0.6</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.2 0.6 0.6</size></box></geometry>
+          <material><ambient>0.6 0.25 0.2 1</ambient><diffuse>0.75 0.3 0.25 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_box_3">
+      <static>true</static>
+      <pose>0.2 -0.4 0.3 0 0 0.4</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>1.0 1.0 0.6</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>1.0 1.0 0.6</size></box></geometry>
+          <material><ambient>0.6 0.25 0.2 1</ambient><diffuse>0.75 0.3 0.25 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_box_4">
+      <static>true</static>
+      <pose>-3.1 -2.2 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.6 1.4 0.6</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.6 1.4 0.6</size></box></geometry>
+          <material><ambient>0.6 0.25 0.2 1</ambient><diffuse>0.75 0.3 0.25 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_cyl_1">
+      <static>true</static>
+      <pose>3.0 -1.0 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.45</radius><length>0.6</length></cylinder></geometry></collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.45</radius><length>0.6</length></cylinder></geometry>
+          <material><ambient>0.2 0.4 0.55 1</ambient><diffuse>0.25 0.5 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_cyl_2">
+      <static>true</static>
+      <pose>1.4 -3.4 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.35</radius><length>0.6</length></cylinder></geometry></collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.35</radius><length>0.6</length></cylinder></geometry>
+          <material><ambient>0.2 0.4 0.55 1</ambient><diffuse>0.25 0.5 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="obstacle_cyl_3">
+      <static>true</static>
+      <pose>-1.2 -3.9 0.3 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>0.6</length></cylinder></geometry></collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.4</radius><length>0.6</length></cylinder></geometry>
+          <material><ambient>0.2 0.4 0.55 1</ambient><diffuse>0.25 0.5 0.7 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ================= robot ================= -->
+    <include>
+      <uri>model://diffbot</uri>
+      <name>diffbot</name>
+      <pose>-4.0 -4.0 0.06 0 0 0.785</pose>
+    </include>
+
+  </world>
+</sdf>

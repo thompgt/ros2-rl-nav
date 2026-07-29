@@ -1,0 +1,209 @@
+<?xml version="1.0" ?>
+<!--
+  Differential-drive robot with a 360-beam 2D LiDAR.
+
+  ==========================================================================
+  SENSOR RATES ARE 20 Hz AND THAT IS NOT ARBITRARY.
+  ==========================================================================
+  The env advances exactly 50 ms of sim time per step() and then blocks until
+  an observation with stamp >= (t0 + 50 ms) arrives. For that to ever be
+  satisfiable, a sensor sample must land *exactly* on 50 ms boundaries.
+
+  At 20 Hz (period 50 ms) with a 1 ms physics step, samples land at
+  0, 50, 100, ... ms -- precisely the step boundaries. Good.
+
+  At 50 Hz they would land at 0, 20, 40, 60 ... ms, and the sample at or after
+  the 50 ms target is the one at 60 ms, which requires 10 ms of sim time that
+  step() is never going to advance. get_obs() then blocks until its timeout and
+  raises, on every single step, forever. The symptom looks like a bridge fault
+  and is not one.
+
+  So: <update_rate> here and <odom_publish_frequency> below must both equal
+  contract.CONTROL_HZ. Changing contract.STEP_DURATION means changing these.
+
+  Wheel geometry is chosen so the CONTRACTS.md command envelope is achievable:
+    radius 0.05 m, separation 0.30 m
+    0.4 m/s   -> 8.0 rad/s wheel speed
+    1.5 rad/s -> +/-4.5 rad/s differential
+  Both well inside the 20 rad/s actuator limit set below.
+-->
+<sdf version="1.9">
+  <model name="diffbot">
+
+    <!-- ============ chassis ============ -->
+    <link name="base_link">
+      <pose>0 0 0 0 0 0</pose>
+      <inertial>
+        <mass>4.0</mass>
+        <inertia>
+          <ixx>0.0433</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.0733</iyy><iyz>0</iyz>
+          <izz>0.1033</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><box><size>0.40 0.30 0.12</size></box></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><box><size>0.40 0.30 0.12</size></box></geometry>
+        <material>
+          <ambient>0.15 0.35 0.15 1</ambient>
+          <diffuse>0.2 0.55 0.2 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- ============ LiDAR ============ -->
+      <sensor name="lidar" type="gpu_lidar">
+        <!-- 0.15 m up: above the chassis, below the 0.6 m obstacle tops. -->
+        <pose>0.15 0 0.15 0 0 0</pose>
+        <topic>scan</topic>
+        <update_rate>20</update_rate>
+        <always_on>true</always_on>
+        <visualize>false</visualize>
+        <gz_frame_id>diffbot/lidar_link</gz_frame_id>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <!-- 360 beams at exactly 1 degree. max_angle is pi - 1 degree so
+                   the last beam does not duplicate the first; even 18-beam
+                   blocks for min-pooling depend on this. -->
+              <min_angle>-3.141593</min_angle>
+              <max_angle>3.124139</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>1</samples>
+              <resolution>1</resolution>
+              <min_angle>0</min_angle>
+              <max_angle>0</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.08</min>
+            <max>10.0</max>
+            <resolution>0.01</resolution>
+          </range>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.01</stddev>
+          </noise>
+        </lidar>
+      </sensor>
+    </link>
+
+    <!-- ============ drive wheels ============ -->
+    <link name="left_wheel">
+      <pose>0 0.15 -0.01 -1.5707 0 0</pose>
+      <inertial>
+        <mass>0.3</mass>
+        <inertia>
+          <ixx>0.000244</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.000244</iyy><iyz>0</iyz>
+          <izz>0.000375</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+    </link>
+
+    <link name="right_wheel">
+      <pose>0 -0.15 -0.01 -1.5707 0 0</pose>
+      <inertial>
+        <mass>0.3</mass>
+        <inertia>
+          <ixx>0.000244</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.000244</iyy><iyz>0</iyz>
+          <izz>0.000375</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <surface>
+          <friction><ode><mu>1.2</mu><mu2>1.2</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><cylinder><radius>0.05</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+    </link>
+
+    <!-- ============ caster ============
+         Frictionless sphere rather than a third wheel joint: a caster joint
+         adds a swivel degree of freedom that makes odometry noisy at low
+         speeds for no benefit to the task. -->
+    <link name="caster">
+      <pose>-0.15 0 -0.04 0 0 0</pose>
+      <inertial>
+        <mass>0.1</mass>
+        <inertia>
+          <ixx>0.00001</ixx><ixy>0</ixy><ixz>0</ixz>
+          <iyy>0.00001</iyy><iyz>0</iyz>
+          <izz>0.00001</izz>
+        </inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><sphere><radius>0.02</radius></sphere></geometry>
+        <surface>
+          <friction><ode><mu>0.0</mu><mu2>0.0</mu2></ode></friction>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry><sphere><radius>0.02</radius></sphere></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.15 0.15 0.15 1</diffuse></material>
+      </visual>
+    </link>
+
+    <joint name="left_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>left_wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <joint name="right_wheel_joint" type="revolute">
+      <parent>base_link</parent>
+      <child>right_wheel</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit><lower>-1e16</lower><upper>1e16</upper></limit>
+      </axis>
+    </joint>
+
+    <joint name="caster_joint" type="fixed">
+      <parent>base_link</parent>
+      <child>caster</child>
+    </joint>
+
+    <!-- ============ differential drive ============ -->
+    <plugin filename="gz-sim-diff-drive-system"
+            name="gz::sim::systems::DiffDrive">
+      <left_joint>left_wheel_joint</left_joint>
+      <right_joint>right_wheel_joint</right_joint>
+      <wheel_separation>0.30</wheel_separation>
+      <wheel_radius>0.05</wheel_radius>
+      <max_wheel_acceleration>10.0</max_wheel_acceleration>
+      <max_velocity>20.0</max_velocity>
+      <topic>cmd_vel</topic>
+      <odom_topic>odom</odom_topic>
+      <tf_topic>tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>diffbot/base_link</child_frame_id>
+      <!-- Must equal contract.CONTROL_HZ. See the header comment. -->
+      <odom_publish_frequency>20</odom_publish_frequency>
+    </plugin>
+
+  </model>
+</sdf>

@@ -1,0 +1,41 @@
+# ros_gz_bridge topic mapping.
+#
+# The gz-side names here depend on the <topic> / <odom_topic> / <tf_topic>
+# elements in models/diffbot/model.sdf. If you rename one there and not here,
+# the bridge starts cleanly, reports no error, and publishes nothing at all.
+# scripts/verify_phase1.sh exists to turn that silence into a failure.
+#
+# Services (/world/arena/control and /world/arena/set_pose) are NOT bridged
+# here -- service bridging is passed as explicit arguments in
+# launch/world.launch.py, which is the better-supported path.
+
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/scan"
+  gz_topic_name: "/scan"
+  ros_type_name: "sensor_msgs/msg/LaserScan"
+  gz_type_name: "gz.msgs.LaserScan"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/odom"
+  gz_topic_name: "/odom"
+  ros_type_name: "nav_msgs/msg/Odometry"
+  gz_type_name: "gz.msgs.Odometry"
+  direction: GZ_TO_ROS
+
+- ros_topic_name: "/tf"
+  gz_topic_name: "/tf"
+  ros_type_name: "tf2_msgs/msg/TFMessage"
+  gz_type_name: "gz.msgs.Pose_V"
+  direction: GZ_TO_ROS
+
+# ROS -> GZ. This is the only actuation path; the env publishes here.
+- ros_topic_name: "/cmd_vel"
+  gz_topic_name: "/cmd_vel"
+  ros_type_name: "geometry_msgs/msg/Twist"
+  gz_type_name: "gz.msgs.Twist"
+  direction: ROS_TO_GZ
