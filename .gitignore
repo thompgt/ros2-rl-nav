@@ -1,0 +1,29 @@
+# ROS 2 / colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Training artifacts
+runs/
+checkpoints/
+models_out/
+tensorboard/
+*.zip
+*.pkl
+*.onnx
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini

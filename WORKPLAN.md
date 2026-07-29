@@ -1,0 +1,140 @@
+# WORKPLAN
+
+Goal: a Gazebo-simulated differential-drive robot exposed as a Gymnasium
+environment over ROS 2, trained with SAC/PPO, and redeployed as a standalone
+ROS 2 inference node.
+
+Realistic timeline: 3–5 weeks part-time. Phases 0–2 are where projects die.
+
+---
+
+## Phase 0 — Contracts and scaffolding ✅
+
+`CONTRACTS.md`, `CLAUDE.md`, repo scaffold, Dockerfile, `pyproject.toml`,
+pytest config, empty modules, Makefile.
+
+**Exit criterion:** `make build` succeeds and
+`ros2 launch robot_rl_env world.launch.py` shows a robot in Gazebo.
+
+## Phase 1 — Simulation and bridge ✅
+
+- SDF world: 10×10 m arena, walls, 7 static box/cylinder obstacles
+- Robot: diff-drive plugin, 360-beam 2D LiDAR (10 m), odometry
+- `ros_gz_bridge` config for `/scan`, `/odom`, `/cmd_vel`, `/clock`, and the
+  world control + set-pose services
+- Launch file with `headless:=true` (default) and `gui:=true`
+
+**Verify by hand — do not delegate:**
+
+- `ros2 topic hz /scan` matches the configured sensor rate
+- `ros2 topic echo /clock` freezes when paused, advances when stepped
+- `/cmd_vel` driven manually produces sane odometry (`teleop_twist_keyboard`)
+- headless launches no GUI process (`pgrep -a gz`)
+
+Bridge misconfigurations produce **silence, not errors**. An agent cannot see
+silence. This is the single most common place to lose three days — hence
+`scripts/verify_phase1.sh`, which turns each check into a printed PASS/FAIL.
+
+## Phase 2 — The Gym environment (the real work)
+
+Build in this order, testing each layer:
+
+**2a. Sim control client** — `pause()`, `unpause()`, `step(n)`, `reset_world()`,
+`set_entity_pose(name, pose)`. Test standalone, no Gym involved.
+
+**2b. Observation assembler** — subscribes to `/scan` and `/odom` on a dedicated
+callback group with a `MultiThreadedExecutor`. `get_obs(min_stamp)` blocks until
+`stamp >= min_stamp`, with a timeout that **raises** rather than returning stale
+data. See the "never do these" list in `CLAUDE.md`.
+
+**2c. `RobotNavEnv(gymnasium.Env)`** — wires 2a and 2b to `CONTRACTS.md`.
+
+Tests to write first:
+
+- `check_env(RobotNavEnv())` passes
+- same seed → identical observation sequence under a fixed action sequence
+- every `step()` advances `/clock` by exactly 50 ms
+- collision termination fires when the robot is teleported into a wall
+- reward is positive when the robot is teleported closer to the goal
+
+**Exit criterion:** a random-action agent runs 100 episodes without hanging,
+crashing, or leaking memory. Log `sim_time / wall_time`; need ≥ 5× for training
+to be practical. Below 1×, profile before proceeding.
+
+## Phase 3 — Training (mostly waiting)
+
+- `train.py` on SB3 with configs, TensorBoard, checkpointing, `VecNormalize`
+- `SubprocVecEnv` with N parallel Gazebo instances on separate `GZ_PARTITION`
+  values and ROS domain IDs
+- `EvalCallback` on a held-out set of fixed start/goal pairs
+- `evaluate.py` → success rate, mean episode length, mean path length over 100
+  deterministic episodes
+
+SAC first (~150k steps), then PPO for comparison. **Three seeds minimum per
+algorithm.** Reporting single-seed RL results is a tell that you haven't done
+RL before; reporting seed variance is a tell that you have.
+
+Expect the first run to fail. Usual causes, in frequency order:
+
+1. **Reward hacking** — spinning or oscillating to farm progress reward. See the
+   escalation ladder in `CONTRACTS.md`.
+2. **No exploration signal** — goals too far, agent never sees a success. Use
+   the `goal_radius` curriculum hook: start at 2 m, expand as success crosses
+   70%.
+3. **Observation scaling** — `VecNormalize` usually saves you, but check.
+
+**Exit criterion:** ≥ 85% success on the held-out set, and a TensorBoard curve
+you'd show someone.
+
+Keep training runs out of the agent loop. Launch them yourself; hand back
+TensorBoard scalars or the eval JSON as text.
+
+## Phase 4 — Deployment node
+
+The part that separates this from a Gym tutorial, and the part interviewers ask
+about.
+
+- `policy_node.py`: loads the policy exported to TorchScript or ONNX (no SB3
+  dependency at runtime), subscribes `/scan` + `/odom`, publishes `/cmd_vel` on
+  a 20 Hz timer
+- Reuses `robot_rl_env.observation.assemble_observation` — does **not**
+  reimplement it
+- `/set_goal` service or `geometry_msgs/PoseStamped` goal topic
+- Safety layer: hard stop if min LiDAR < 0.15 m; watchdog zeroing `/cmd_vel` if
+  no observation for 200 ms
+- World runs **unpaused, real time**
+
+**Write up the gap.** Measure success rate step-synchronized vs. free-running
+real-time. There will be a gap, driven by latency and jitter the training loop
+eliminated by construction. Quantifying and explaining it is the most
+interesting paragraph in the README.
+
+## Phase 5 — Packaging
+
+- README with a GIF in the first 100 px. Nobody clones your repo.
+- Architecture diagram: Gazebo ↔ bridge ↔ env ↔ SB3, step-sync loop marked
+- Results table: SAC vs PPO, mean ± std over seeds; success / path length /
+  collision rate
+- The Phase 4 gap analysis
+- One command to reproduce: `docker compose up train`
+- CI running the fast tests headless on GitHub Actions
+
+---
+
+## Reduced-scope fallback
+
+If Phase 1 or 2 stalls badly: cut Gazebo, wrap a PyBullet differential-drive
+robot instead, keep the ROS 2 deployment node. You lose bridge complexity but
+keep the training loop, the policy export, and the sim-to-deployment analysis —
+most of the value. **Do not cut Phase 4.** A training-only project is one of
+thousands on GitHub.
+
+## Agent failure modes to watch for
+
+- Reaching for Gazebo Classic APIs — heavily represented in training data,
+  entirely wrong for Harmonic
+- Silent fallbacks on observation timeout
+- Reimplementing observation preprocessing in the deployment node
+- `rclpy.spin_once()` in the step loop instead of a properly configured
+  multithreaded executor with callback groups
+- Suggesting `time.sleep()` anywhere in `step()`
