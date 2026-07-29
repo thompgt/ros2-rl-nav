@@ -1,0 +1,24 @@
+# Tooling config only. The ROS 2 package itself is built by ament/colcon via
+# src/robot_rl_env/setup.py — this file does not package it.
+
+[tool.pytest.ini_options]
+testpaths = ["src/robot_rl_env/test"]
+python_files = ["test_*.py"]
+addopts = "-ra --strict-markers"
+# Any test that hangs is a step-synchronization bug, and a hung test is
+# indistinguishable from a slow one in CI. Fail loudly instead.
+timeout = 120
+markers = [
+    "sim: requires a running Gazebo instance (slow; excluded from CI fast path)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+exclude = ["build", "install", "log"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "B008",  # ROS 2 idiom: defaults constructed in signatures
+]

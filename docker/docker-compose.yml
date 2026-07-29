@@ -1,0 +1,63 @@
+# All services share one image and bind-mount the repo at /ws, so an edit on
+# the Windows host is visible in the container immediately — no rebuild for
+# Python changes.
+#
+# Note: `network_mode: host` is deliberately NOT used. It behaves differently
+# under Docker Desktop on Windows than on Linux. Each service instead gets its
+# own network namespace and a distinct ROS_DOMAIN_ID, which is what Phase 3's
+# parallel envs need anyway.
+
+x-common: &common
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+  image: ros2-rl-nav:jazzy
+  volumes:
+    - ../:/ws
+  working_dir: /ws
+  environment:
+    ROS_DOMAIN_ID: "42"
+    RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+    QT_QPA_PLATFORM: offscreen
+    PYTHONUNBUFFERED: "1"
+  # Gazebo + a multithreaded executor need real shared memory; the 64 MB
+  # default causes opaque crashes under load.
+  shm_size: "1gb"
+  init: true
+
+services:
+  # Interactive development shell.
+  dev:
+    <<: *common
+    stdin_open: true
+    tty: true
+    command: bash
+
+  # Fast tests, headless, exits non-zero on failure. This is what CI runs.
+  test:
+    <<: *common
+    command: >
+      bash -lc "colcon build --symlink-install --event-handlers console_direct+
+      && source install/setup.bash
+      && pytest -v src/robot_rl_env/test"
+
+  # Phase 1 bridge verification — prints PASS/FAIL per check.
+  verify:
+    <<: *common
+    command: bash -lc "scripts/verify_phase1.sh"
+
+  # Phase 3. Not implemented yet.
+  train:
+    <<: *common
+    command: >
+      bash -lc "colcon build --symlink-install
+      && source install/setup.bash
+      && python3 -m robot_rl_env.train"
+
+  # Phase 4. Not implemented yet.
+  deploy:
+    <<: *common
+    command: >
+      bash -lc "colcon build --symlink-install
+      && source install/setup.bash
+      && ros2 run robot_rl_env policy_node"

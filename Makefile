@@ -1,0 +1,43 @@
+COMPOSE := docker compose -f docker/docker-compose.yml
+
+.PHONY: help build shell test verify lint train deploy world clean
+
+help:
+	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
+	@echo "shell    - interactive shell in the container (repo mounted at /ws)"
+	@echo "test     - colcon build + pytest, headless"
+	@echo "verify   - Phase 1 bridge verification, PASS/FAIL per check"
+	@echo "lint     - ruff check"
+	@echo "world    - launch the arena headless (paused), for manual poking"
+	@echo "train    - Phase 3"
+	@echo "deploy   - Phase 4"
+	@echo "clean    - remove colcon build artifacts"
+
+build:
+	$(COMPOSE) build
+
+shell:
+	$(COMPOSE) run --rm dev
+
+test:
+	$(COMPOSE) run --rm test
+
+verify:
+	$(COMPOSE) run --rm verify
+
+lint:
+	$(COMPOSE) run --rm dev bash -lc "ruff check src scripts"
+
+world:
+	$(COMPOSE) run --rm dev bash -lc "colcon build --symlink-install \
+	  && source install/setup.bash \
+	  && ros2 launch robot_rl_env world.launch.py headless:=true"
+
+train:
+	$(COMPOSE) run --rm train
+
+deploy:
+	$(COMPOSE) run --rm deploy
+
+clean:
+	rm -rf build install log
