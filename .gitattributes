@@ -1,0 +1,9 @@
+# This repo is developed on Windows but every file is consumed inside a Linux
+# container. CRLF line endings break shell scripts (`bad interpreter: ^M`) and
+# SDF/YAML parsers in subtle ways. Force LF everywhere, no exceptions.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.gif binary
+*.onnx binary
+*.pt binary
