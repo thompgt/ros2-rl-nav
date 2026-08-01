@@ -46,6 +46,12 @@ services:
     <<: *common
     command: bash -lc "scripts/verify_phase1.sh"
 
+  # Phase 2 exit criteria — 100 random episodes, throughput, memory, command
+  # timing. Slower than `test`; not part of CI.
+  verify2:
+    <<: *common
+    command: bash -lc "scripts/verify_phase2.sh"
+
   # Phase 3. Not implemented yet.
   train:
     <<: *common

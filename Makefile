@@ -1,12 +1,13 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify lint train deploy world clean
+.PHONY: help build shell test verify verify2 lint train deploy world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
 	@echo "shell    - interactive shell in the container (repo mounted at /ws)"
 	@echo "test     - colcon build + pytest, headless"
 	@echo "verify   - Phase 1 bridge verification, PASS/FAIL per check"
+	@echo "verify2  - Phase 2 exit criteria: 100 random episodes, throughput, memory"
 	@echo "lint     - ruff check"
 	@echo "world    - launch the arena headless (paused), for manual poking"
 	@echo "train    - Phase 3"
@@ -24,6 +25,9 @@ test:
 
 verify:
 	$(COMPOSE) run --rm verify
+
+verify2:
+	$(COMPOSE) run --rm verify2
 
 lint:
 	$(COMPOSE) run --rm dev bash -lc "ruff check src scripts"
