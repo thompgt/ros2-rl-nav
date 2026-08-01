@@ -27,7 +27,7 @@ pytest.importorskip("rclpy", reason="ROS 2 is not available on this host")
 
 from gymnasium.utils.env_checker import check_env  # noqa: E402
 
-from robot_rl_env import contract  # noqa: E402
+from robot_rl_env import arena, contract  # noqa: E402
 from robot_rl_env.env import RobotNavEnv  # noqa: E402
 from robot_rl_env.observation import from_body_frame  # noqa: E402
 
@@ -302,6 +302,34 @@ def test_reset_starts_the_robot_clear_of_obstacles(env):
     for seed in range(5):
         _, info = env.reset(seed=seed)
         assert info["min_lidar"] >= contract.COLLISION_THRESHOLD
+
+
+def test_reset_actually_teleports_the_robot_to_the_sampled_pose(env):
+    """The one thing about reset that nothing else would catch.
+
+    There is no ground-truth pose topic -- only dead-reckoned odometry, which
+    reports (0, 0, 0) after a reset whether or not the teleport landed. If
+    ``set_pose`` were queued behind the world reset and silently clobbered by
+    it, every episode would start at the world origin, the observation would
+    still be well-formed, and the only symptom would be a policy that never
+    learns the arena.
+
+    So: check the LiDAR against the analytic clearance at the sampled pose. The
+    sensor sits 0.15 m ahead of the robot origin and arena.clearance() measures
+    from the origin, which bounds the disagreement; anything larger means the
+    robot is not where the sampler put it (or arena.OBSTACLES has drifted from
+    the SDF).
+    """
+    tolerance = contract.LIDAR_OFFSET_X + 0.05  # sensor offset + beam/noise slop
+    for seed in range(5):
+        _, info = env.reset(seed=seed)
+        x, y, _ = info["start_world"]
+        predicted = arena.clearance(x, y)
+        assert abs(info["min_lidar"] - predicted) <= tolerance, (
+            f"seed {seed}: LiDAR reports {info['min_lidar']:.3f} m of clearance "
+            f"at the sampled pose ({x:.2f}, {y:.2f}), where the arena geometry "
+            f"predicts {predicted:.3f} m. The robot is not where reset() put it."
+        )
 
 
 # --- action scaling (pure) ----------------------------------------------------
