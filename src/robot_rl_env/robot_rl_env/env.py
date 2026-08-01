@@ -85,13 +85,6 @@ class RobotNavEnv(gym.Env):
 
     metadata = {"render_modes": []}
 
-    observation_space = spaces.Box(
-        low=-1.0, high=1.0, shape=(contract.OBS_DIM,), dtype=np.float32
-    )
-    action_space = spaces.Box(
-        low=-1.0, high=1.0, shape=(contract.ACT_DIM,), dtype=np.float32
-    )
-
     def __init__(
         self,
         *,
@@ -109,34 +102,59 @@ class RobotNavEnv(gym.Env):
         self.render_mode = None
         self._obs_timeout = obs_timeout
 
-        suffix = next(_INSTANCE)
-        # A private context rather than the global one, so several envs can
-        # share a process (and so an env can be closed and rebuilt inside one
-        # pytest session) without fighting over rclpy's global state.
-        self._context = rclpy.Context()
-        rclpy.init(context=self._context)
-
-        self._sim = SimControl(f"sim_control_{suffix}", context=self._context)
-        self._obs = ObservationAssembler(
-            f"observation_assembler_{suffix}", context=self._context
+        # Per-instance rather than class-level: a Box carries its own RNG, and
+        # two envs in one process (DummyVecEnv) sharing one space would sample
+        # from a single stream, so seeding either would silently steer both.
+        self.observation_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(contract.OBS_DIM,), dtype=np.float32
         )
-        self._node = Node(f"robot_nav_env_{suffix}", context=self._context)
-        self._cmd_pub = self._node.create_publisher(Twist, "/cmd_vel", CMD_QOS)
-
-        self._executor = MultiThreadedExecutor(num_threads=4, context=self._context)
-        for node in (self._sim, self._obs, self._node):
-            self._executor.add_node(node)
-        self._spin_thread = threading.Thread(
-            target=self._spin, name=f"rclpy-executor-{suffix}", daemon=True
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(contract.ACT_DIM,), dtype=np.float32
         )
-        self._spin_thread.start()
+
+        # Named early so close() can run against a half-built env: anything
+        # below here can raise, and __del__ will call close() regardless.
         self._closed = False
+        self._context = None
+        self._executor = None
+        self._spin_thread = None
+        self._nodes: tuple = ()
 
-        self._sim.wait_for_services(timeout=service_timeout)
-        # Paused is the resting state of this world. Assert it rather than
-        # assume the launch file was given paused:=true.
-        self._sim.pause()
-        self._obs.wait_for_first_message(timeout=service_timeout)
+        try:
+            suffix = next(_INSTANCE)
+            # A private context rather than the global one, so several envs can
+            # share a process (and so an env can be closed and rebuilt inside
+            # one pytest session) without fighting over rclpy's global state.
+            self._context = rclpy.Context()
+            rclpy.init(context=self._context)
+
+            self._sim = SimControl(f"sim_control_{suffix}", context=self._context)
+            self._obs = ObservationAssembler(
+                f"observation_assembler_{suffix}", context=self._context
+            )
+            self._node = Node(f"robot_nav_env_{suffix}", context=self._context)
+            self._nodes = (self._sim, self._obs, self._node)
+            self._cmd_pub = self._node.create_publisher(Twist, "/cmd_vel", CMD_QOS)
+
+            self._executor = MultiThreadedExecutor(num_threads=4, context=self._context)
+            for node in self._nodes:
+                self._executor.add_node(node)
+            self._spin_thread = threading.Thread(
+                target=self._spin, name=f"rclpy-executor-{suffix}", daemon=True
+            )
+            self._spin_thread.start()
+
+            self._sim.wait_for_services(timeout=service_timeout)
+            # Paused is the resting state of this world. Assert it rather than
+            # assume the launch file was given paused:=true.
+            self._sim.pause()
+            self._obs.wait_for_first_message(timeout=service_timeout)
+        except BaseException:
+            # A constructor that raises after starting the executor leaves a
+            # spinning thread and a DDS participant behind, and the usual cause
+            # -- the simulator is not up -- is one a caller retries in a loop.
+            self.close()
+            raise
 
         # --- episode state, all set properly in reset() ---
         self._goal_odom: tuple[float, float] = (0.0, 0.0)
@@ -255,13 +273,15 @@ class RobotNavEnv(gym.Env):
             return
         self._closed = True
         try:
-            self._executor.shutdown(timeout_sec=2.0)
+            if self._executor is not None:
+                self._executor.shutdown(timeout_sec=2.0)
         finally:
-            for node in (self._sim, self._obs, self._node):
+            for node in self._nodes:
                 node.destroy_node()
-            if self._context.ok():
+            if self._context is not None and self._context.ok():
                 rclpy.shutdown(context=self._context)
-            self._spin_thread.join(timeout=5.0)
+            if self._spin_thread is not None:
+                self._spin_thread.join(timeout=5.0)
 
     def __del__(self):
         # Envs are routinely dropped without close() (SubprocVecEnv workers,
