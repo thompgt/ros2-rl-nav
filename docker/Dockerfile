@@ -45,7 +45,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir --break-system-packages \
       --index-url https://download.pytorch.org/whl/cpu \
       "torch==2.4.*" \
- && pip install --no-cache-dir --break-system-packages \
+ && pip install --no-cache-dir --break-system-packages --ignore-installed \
       "gymnasium>=0.29,<2.0" \
       "stable-baselines3>=2.3,<3.0" \
       "numpy<2.0" \

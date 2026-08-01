@@ -51,8 +51,8 @@ class SimControlError(RuntimeError):
 class SimControl(Node):
     """Pause, step, reset, and teleport, via the bridged Gazebo services."""
 
-    def __init__(self, node_name: str = "sim_control"):
-        super().__init__(node_name)
+    def __init__(self, node_name: str = "sim_control", *, context=None):
+        super().__init__(node_name, context=context)
         self._group = MutuallyExclusiveCallbackGroup()
         self._control = self.create_client(
             ControlWorld, contract.WORLD_CONTROL_SERVICE, callback_group=self._group

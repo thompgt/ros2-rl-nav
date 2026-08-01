@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import threading
+from dataclasses import dataclass
 
 import numpy as np
 from nav_msgs.msg import Odometry
@@ -53,18 +54,43 @@ def _stamp_ns(header) -> int:
     return header.stamp.sec * 1_000_000_000 + header.stamp.nanosec
 
 
+@dataclass(frozen=True)
+class Sample:
+    """One consistent snapshot of ``/scan`` + ``/odom``.
+
+    Handing the caller a snapshot rather than assembling immediately is what
+    lets ``env.reset()`` compute the goal *from the robot pose it just read* and
+    then assemble an observation against that exact same pose. Calling
+    ``get_obs`` twice to do the same job would let a scan that lands between the
+    two calls pair a goal derived from pose A with an observation built from
+    pose B -- a 50 ms frame offset that no assertion would ever catch.
+    """
+
+    pooled: np.ndarray
+    x: float
+    y: float
+    yaw: float
+    stamp_ns: int
+
+    @property
+    def xy(self) -> tuple[float, float]:
+        return (self.x, self.y)
+
+
 class ObservationAssembler(Node):
     """Latest-sample cache over ``/scan`` + ``/odom``, with a sim-time barrier."""
 
-    def __init__(self, node_name: str = "observation_assembler"):
-        super().__init__(node_name)
+    def __init__(self, node_name: str = "observation_assembler", *, context=None):
+        super().__init__(node_name, context=context)
         self._group = ReentrantCallbackGroup()
         self._cv = threading.Condition()
 
         self._scan_stamp_ns: int | None = None
         self._scan_pooled: np.ndarray | None = None
+        self._scan_seq: int = 0
         self._odom_stamp_ns: int | None = None
         self._odom_pose: tuple[float, float, float] | None = None
+        self._odom_seq: int = 0
         self._clock_ns: int = 0
 
         self.create_subscription(
@@ -87,6 +113,7 @@ class ObservationAssembler(Node):
         with self._cv:
             self._scan_pooled = pooled
             self._scan_stamp_ns = stamp
+            self._scan_seq += 1
             self._cv.notify_all()
 
     def _on_odom(self, msg: Odometry) -> None:
@@ -97,6 +124,7 @@ class ObservationAssembler(Node):
         with self._cv:
             self._odom_pose = pose
             self._odom_stamp_ns = stamp
+            self._odom_seq += 1
             self._cv.notify_all()
 
     def _on_clock(self, msg: Clock) -> None:
@@ -110,6 +138,21 @@ class ObservationAssembler(Node):
         with self._cv:
             return self._clock_ns
 
+    def sequence(self) -> tuple[int, int]:
+        """``(scan_count, odom_count)`` received so far.
+
+        The env snapshots this immediately after ``reset_world()`` returns and
+        then requires the next observation to be strictly newer. Without it,
+        reset is unsound: resetting the world sets sim time back to zero, so a
+        message left over from the *previous* episode carries a stamp far in the
+        future of the post-reset target and satisfies a ``stamp >= target``
+        barrier instantly. The first observation of the episode would then be
+        the last observation of the one before it -- deterministic, plausible,
+        and completely wrong.
+        """
+        with self._cv:
+            return (self._scan_seq, self._odom_seq)
+
     def wait_for_first_message(self, timeout: float = 30.0) -> None:
         """Block until every topic has produced at least one message, or raise."""
         def ready() -> bool:
@@ -121,19 +164,23 @@ class ObservationAssembler(Node):
 
     # --- the barrier ----------------------------------------------------------
 
-    def get_obs(
+    def wait_for_sample(
         self,
         min_stamp_ns: int,
-        goal_xy: tuple[float, float],
-        prev_action,
-        step_count: int,
+        *,
+        min_seq: tuple[int, int] | None = None,
         timeout: float = contract.OBS_TIMEOUT,
-    ) -> tuple[np.ndarray, dict]:
-        """Block until both sensors reach ``min_stamp_ns``, then assemble.
+    ) -> Sample:
+        """Block until both sensors reach ``min_stamp_ns``, then snapshot them.
 
-        Raises ``ObservationTimeout`` if they do not. It never returns stale
-        data -- see the module docstring.
+        ``min_seq`` additionally requires each topic to have delivered a message
+        it had not delivered when that sequence was taken -- see
+        :meth:`sequence`.
+
+        Raises ``ObservationTimeout`` if the data does not arrive. It never
+        returns stale data. See the module docstring.
         """
+        want_scan, want_odom = (-1, -1) if min_seq is None else min_seq
 
         def fresh() -> bool:
             return (
@@ -141,25 +188,62 @@ class ObservationAssembler(Node):
                 and self._odom_stamp_ns is not None
                 and self._scan_stamp_ns >= min_stamp_ns
                 and self._odom_stamp_ns >= min_stamp_ns
+                and self._scan_seq > want_scan
+                and self._odom_seq > want_odom
             )
 
         with self._cv:
             if not self._cv.wait_for(fresh, timeout=timeout):
                 raise ObservationTimeout(self._diagnose(timeout, min_stamp_ns))
-            pooled = self._scan_pooled
             rx, ry, ryaw = self._odom_pose
-            stamp_ns = min(self._scan_stamp_ns, self._odom_stamp_ns)
+            return Sample(
+                pooled=self._scan_pooled,
+                x=rx,
+                y=ry,
+                yaw=ryaw,
+                # The older of the two: the sample as a whole is only as fresh
+                # as its stalest component.
+                stamp_ns=min(self._scan_stamp_ns, self._odom_stamp_ns),
+            )
 
+    @staticmethod
+    def assemble(
+        sample: Sample,
+        goal_xy: tuple[float, float],
+        prev_action,
+        step_count: int,
+    ) -> tuple[np.ndarray, dict]:
+        """Turn a snapshot into ``(obs, info)``. Pure; no waiting, no ROS."""
         obs = assemble_observation(
-            None, (rx, ry), ryaw, goal_xy, prev_action, step_count, pooled=pooled
+            None,
+            sample.xy,
+            sample.yaw,
+            goal_xy,
+            prev_action,
+            step_count,
+            pooled=sample.pooled,
         )
         info = {
-            "distance_to_goal": math.dist((rx, ry), goal_xy),
-            "min_lidar": float(pooled.min()),
-            "sim_time": stamp_ns / 1e9,
-            "robot_pose": (rx, ry, ryaw),
+            "distance_to_goal": math.dist(sample.xy, goal_xy),
+            "min_lidar": float(sample.pooled.min()),
+            "sim_time": sample.stamp_ns / 1e9,
+            "robot_pose": (sample.x, sample.y, sample.yaw),
         }
         return obs, info
+
+    def get_obs(
+        self,
+        min_stamp_ns: int,
+        goal_xy: tuple[float, float],
+        prev_action,
+        step_count: int,
+        timeout: float = contract.OBS_TIMEOUT,
+        *,
+        min_seq: tuple[int, int] | None = None,
+    ) -> tuple[np.ndarray, dict]:
+        """:meth:`wait_for_sample` followed by :meth:`assemble`."""
+        sample = self.wait_for_sample(min_stamp_ns, min_seq=min_seq, timeout=timeout)
+        return self.assemble(sample, goal_xy, prev_action, step_count)
 
     def _diagnose(self, timeout: float, min_stamp_ns: int | None = None) -> str:
         """Turn a timeout into a message that names the likely cause.

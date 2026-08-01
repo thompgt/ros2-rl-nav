@@ -21,4 +21,15 @@ exclude = ["build", "install", "log"]
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = [
     "B008",  # ROS 2 idiom: defaults constructed in signatures
+    # SIM300 flags `assert value == pytest.approx(x)` as a Yoda condition and
+    # would have us write the expected value on the left, which is backwards
+    # for an assertion and reads worse everywhere it appears.
+    "SIM300",
 ]
+
+[tool.ruff.lint.isort]
+# Without this, ruff classifies `robot_rl_env` as first- or third-party
+# depending on the working directory it is invoked from -- so `ruff check` from
+# the repo root and from src/robot_rl_env (which is what CI does) demand
+# opposite import orders and one of them always fails.
+known-first-party = ["robot_rl_env"]
