@@ -107,19 +107,46 @@ WORKPLAN.md               the phased plan; which phase you are in
 docker/                   Dockerfile, compose, entrypoint
 src/robot_rl_env/
   robot_rl_env/
-    sim_control.py        Phase 2a — world control service client
-    observation.py        Phase 2b — SHARED obs assembly (train + deploy)
+    contract.py           every contract number, transcribed once
+    arena.py              PURE — arena geometry + free-space rejection sampling
+    sim_control.py        Phase 2a — world control / set_pose service client
+    observation.py        Phase 2b — PURE, SHARED obs assembly (train + deploy)
+    observation_node.py   Phase 2b — ROS subscriber layer around it
     env.py                Phase 2c — RobotNavEnv(gymnasium.Env)
-    train.py              Phase 3
-    evaluate.py           Phase 3
-    policy_node.py        Phase 4 — ROS 2 inference node
+    policy_node.py        Phase 4 — ROS 2 inference node (scaffolding only)
   worlds/arena.sdf        10x10 m arena, 7 obstacles, 1 ms physics step
   models/diffbot/         chassis, diff drive, 360-beam LiDAR
   config/bridge.yaml      ros_gz_bridge topic + service mapping
   launch/world.launch.py  headless:=true default
-  test/
+  test/                   test_env.py is @pytest.mark.sim; the rest are pure
 scripts/verify_phase1.sh  text-output verification of the bridge
+scripts/verify_phase2.sh  launches the world, then runs phase2_checks.py
+scripts/phase2_checks.py  Phase 2 exit criteria as PASS/FAIL lines
 ```
+
+`train.py` and `evaluate.py` (Phase 3) do not exist yet; `docker-compose.yml`
+already has `train`/`deploy` services pointing at them.
+
+## Pure core, ROS shell
+
+The parts that are hard to get right are deliberately ROS-free, so their tests
+run in milliseconds on the Windows host with no simulator:
+
+- `contract.py` — every number in `CONTRACTS.md`, once. Nothing downstream
+  re-declares a threshold, a rate, or a limit. Change a value here *and* in
+  `CONTRACTS.md`; never only in a consumer.
+- `arena.py` — obstacle geometry and reset rejection sampling. Its `OBSTACLES`
+  table intentionally duplicates `worlds/arena.sdf`; `test_arena.py` parses the
+  SDF and asserts the two agree, so the copy cannot drift. Do not "fix" the
+  duplication by parsing SDF at runtime.
+- `observation.py` — the 26-vector assembly. `observation_node.py` is only
+  subscriptions, QoS, and the stamp barrier; all arithmetic lives in the pure
+  module, which is also what `policy_node.py` must import.
+
+Similar constants also appear in `models/diffbot/model.sdf` (beam count, LiDAR
+range, sensor pose) and `worlds/arena.sdf` (`max_step_size`). `contract.py`'s
+docstrings name the SDF element each one must match, and `test_contract.py`
+checks them.
 
 ## Commands
 
@@ -129,13 +156,55 @@ Everything runs inside the container; the host is Windows.
 make build          # docker build
 make shell          # interactive container shell, workspace mounted at /ws
 make test           # colcon build + pytest, headless
+make lint           # ruff check src scripts
 make verify         # Phase 1 bridge verification, prints pass/fail per check
+make verify2        # Phase 2 exit criteria: episodes, throughput, memory, timing
+make verify2 EPISODES=25   # shorter run; the count cannot be appended to the
+                           # compose service command, which is why it is a var
+make world          # launch the arena headless and paused, for manual poking
 make train          # Phase 3
 make deploy         # Phase 4
+make clean          # rm -rf build install log
 ```
 
 Inside the container the workspace is `/ws`; build with
 `colcon build --symlink-install && source install/setup.bash`.
+
+To run one test, or one file, from a container shell — the world is launched by
+a session fixture in `test_env.py`, so no separate `ros2 launch` is needed:
+
+```bash
+colcon build --symlink-install && source install/setup.bash
+pytest src/robot_rl_env/test/test_env.py -k collision -x
+pytest src/robot_rl_env/test -m "not sim"      # pure tests only, seconds
+```
+
+The pure tests also run on the Windows host with no container — but **only from
+the package root**, because there is no colcon install to put `robot_rl_env` on
+the path:
+
+```powershell
+cd src/robot_rl_env; python -m pytest test -q   # 40 passed, test_env skipped
+```
+
+From the repo root the same command dies in collection with
+`ModuleNotFoundError: robot_rl_env`. CI's fast job sets
+`working-directory: src/robot_rl_env` for exactly this reason, and runs
+`ruff check src scripts` from the repo root — the two working directories are
+also why `known-first-party` is pinned in `pyproject.toml`. CI's second job only
+proves the image still builds; no runner executes the simulator.
+
+`test_env.py` skips itself via `pytest.importorskip("rclpy")`, so a host run
+reports it as skipped rather than failing.
+
+Two gotchas that cost real time if you meet them cold:
+
+- ROS ships pytest plugins written against pytest 7, and the image installs
+  pytest 9. Every invocation dies before collection with an INTERNALERROR that
+  names pluggy, not ROS. `pyproject.toml` disables them by entry-point name
+  (`launch_testing`, `launch_ros` — *not* the distribution names).
+- ROS setup scripts read unset variables, so `set -u` in a shell script must be
+  lifted around `source /opt/ros/jazzy/setup.bash`.
 
 ## Working rules
 
@@ -149,5 +218,12 @@ Inside the container the workspace is `/ws`; build with
 
 ## Current phase
 
-**Phase 0–1 in progress.** Update this line when a phase closes; it is how the
-next session knows where to start.
+**Phase 2 complete; Phase 3 (training) is next.** Update this line when a phase
+closes; it is how the next session knows where to start.
+
+Two deviations from `CONTRACTS.md` are outstanding and want a human ruling —
+both are documented at the point of deviation, neither is a silent divergence:
+
+1. Reset does not restore the world (`contract.BRAKE_ITERATIONS`).
+2. Episodes are therefore reproducible but not bit-identical
+   (`test_same_seed_and_actions_give_identical_observations`).
