@@ -142,6 +142,40 @@ def sample_free_point(
     )
 
 
+def validate_episode(
+    robot_xy: tuple[float, float],
+    goal_xy: tuple[float, float],
+    margin: float = contract.MIN_OBSTACLE_CLEARANCE,
+) -> None:
+    """Raise ``ValueError`` unless an explicitly specified episode is legal.
+
+    ``sample_episode`` cannot emit a degenerate episode; a hand-written or
+    file-loaded one can, and every way it can be wrong is silent at runtime. A
+    start inside an obstacle spawns the robot in collision and terminates on
+    step 1; a goal inside a wall is unreachable. Both read as "the policy
+    scores zero on the held-out set" rather than as the configuration error
+    they are, and an eval set is exactly where nobody looks for a bug.
+
+    Applied to fixed episodes only. The sampler's own output satisfies this by
+    construction, so re-checking it on every reset would be pure overhead.
+    """
+    for label, (x, y) in (("start", robot_xy), ("goal", goal_xy)):
+        c = clearance(x, y)
+        if c < margin:
+            raise ValueError(
+                f"{label} ({x:.3f}, {y:.3f}) has {c:.3f} m clearance, below the "
+                f"required {margin:.3f} m. It is inside or too close to an "
+                f"obstacle or wall."
+            )
+    separation = math.dist(robot_xy, goal_xy)
+    if separation < contract.MIN_START_GOAL_DISTANCE:
+        raise ValueError(
+            f"start and goal are {separation:.3f} m apart, below the required "
+            f"{contract.MIN_START_GOAL_DISTANCE} m. An episode that begins "
+            f"within the goal tolerance teaches and measures nothing."
+        )
+
+
 def sample_episode(
     rng: np.random.Generator,
     goal_radius: float | None = None,

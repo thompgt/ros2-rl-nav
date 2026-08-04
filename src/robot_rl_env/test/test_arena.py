@@ -176,3 +176,37 @@ def test_reset_clearance_cannot_start_an_episode_in_collision():
         f"a freshly reset robot can read {worst_case:.3f} m, at or below the "
         f"{contract.COLLISION_THRESHOLD} m collision threshold"
     )
+
+
+# --- explicitly specified episodes -------------------------------------------
+
+def test_validate_accepts_what_the_sampler_produces():
+    """The sampler and the validator must agree on what "legal" means.
+
+    If they drift apart, every fixed eval episode generated from the sampler
+    starts raising -- and the natural fix, loosening the validator, is the
+    wrong one.
+    """
+    rng = np.random.default_rng(11)
+    for _ in range(200):
+        robot_xy, _, goal_xy = arena.sample_episode(rng)
+        arena.validate_episode(robot_xy, goal_xy)
+
+
+@pytest.mark.parametrize(
+    "robot_xy, goal_xy, expected",
+    [
+        ((-2.8, 2.6), (2.0, 2.0), "start"),        # inside obstacle_box_1
+        ((0.0, 4.0), (3.0, -1.0), "goal"),         # inside obstacle_cyl_1
+        ((0.0, 4.95), (2.0, 2.0), "start"),        # inside the north wall
+        ((4.0, 4.0), (12.0, 0.0), "goal"),         # outside the arena entirely
+    ],
+)
+def test_validate_rejects_unreachable_or_in_collision(robot_xy, goal_xy, expected):
+    with pytest.raises(ValueError, match=expected):
+        arena.validate_episode(robot_xy, goal_xy)
+
+
+def test_validate_rejects_a_pre_solved_episode():
+    with pytest.raises(ValueError, match="apart"):
+        arena.validate_episode((4.0, 4.0), (4.1, 4.0))

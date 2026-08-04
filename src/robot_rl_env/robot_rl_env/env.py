@@ -196,12 +196,46 @@ class RobotNavEnv(gym.Env):
     # --- gymnasium API --------------------------------------------------------
 
     def reset(self, *, seed=None, options=None):
-        """See CONTRACTS.md ("Reset"). ``options={"goal_radius": r}`` caps the
-        start-goal distance for the Phase 3 curriculum."""
-        super().reset(seed=seed)
-        goal_radius = None if options is None else options.get("goal_radius")
+        """See CONTRACTS.md ("Reset").
 
-        (rx, ry), ryaw, goal_world = arena.sample_episode(self.np_random, goal_radius)
+        ``options``:
+
+        - ``{"goal_radius": r}`` caps the start-goal distance. The Phase 3
+          curriculum hook, specified in CONTRACTS.md.
+        - ``{"start": (x, y, yaw), "goal": (x, y)}`` replaces sampling with a
+          fixed episode, in **world** coordinates. Not in CONTRACTS.md; added
+          for Phase 3, which needs a held-out evaluation set that is identical
+          across algorithms, seeds and checkpoints. Comparing a SAC run against
+          a PPO run on two different sets of random episodes measures the
+          sampler as much as the policies.
+        """
+        super().reset(seed=seed)
+        options = options or {}
+        goal_radius = options.get("goal_radius")
+        start, goal = options.get("start"), options.get("goal")
+
+        if (start is None) != (goal is None):
+            raise ValueError(
+                "options 'start' and 'goal' must be given together. Fixing one "
+                "and sampling the other yields an episode that is neither "
+                "reproducible nor uniformly random."
+            )
+        if start is not None and goal_radius is not None:
+            raise ValueError(
+                "options 'goal_radius' and 'start'/'goal' are mutually "
+                "exclusive: the curriculum cap has no meaning for an episode "
+                "whose goal is already fixed."
+            )
+
+        if start is None:
+            (rx, ry), ryaw, goal_world = arena.sample_episode(self.np_random, goal_radius)
+        else:
+            rx, ry, ryaw = (float(v) for v in start)
+            goal_world = (float(goal[0]), float(goal[1]))
+            # Validated on every fixed reset, not once at load: an eval set can
+            # arrive from a file, a CLI flag or a callback, and there is no one
+            # place upstream that all of them pass through.
+            arena.validate_episode((rx, ry), goal_world)
 
         # Brake to a stop, then teleport. Not ControlWorld(reset.all), which
         # CONTRACTS.md asks for: it drops the set_pose that follows it about

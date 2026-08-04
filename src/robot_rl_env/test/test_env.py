@@ -370,6 +370,33 @@ def test_goal_radius_option_caps_the_goal_distance(env):
         assert math.dist(start, info["goal_world"]) <= 2.0 + 1e-9
 
 
+def test_fixed_episode_option_overrides_sampling(env):
+    """Phase 3's held-out evaluation set. Two resets with the same fixed
+    episode and *different* seeds must place the robot identically -- if the
+    seed still moved anything, the eval set would not be held constant across
+    the runs it exists to compare."""
+    start, goal = (3.5, 3.5, 0.0), (-3.0, -4.0)
+    for seed in (0, 999):
+        _, info = env.reset(seed=seed, options={"start": start, "goal": goal})
+        assert info["start_world"] == pytest.approx(start)
+        assert info["goal_world"] == pytest.approx(goal)
+        assert info["distance_to_goal"] == pytest.approx(math.dist(start[:2], goal), abs=0.05)
+
+
+def test_a_fixed_episode_inside_an_obstacle_raises(env):
+    """Rejected before the teleport, not diagnosed afterwards from a zero
+    success rate."""
+    with pytest.raises(ValueError, match="clearance"):
+        env.reset(options={"start": (-2.8, 2.6, 0.0), "goal": (3.5, 3.5)})
+
+
+def test_half_specified_fixed_episodes_raise(env):
+    with pytest.raises(ValueError, match="together"):
+        env.reset(options={"start": (3.5, 3.5, 0.0)})
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        env.reset(options={"start": (3.5, 3.5, 0.0), "goal": (-3.0, -4.0), "goal_radius": 2.0})
+
+
 def test_reset_samples_a_goal_that_is_not_already_reached(env):
     for seed in range(5):
         _, info = env.reset(seed=seed)
