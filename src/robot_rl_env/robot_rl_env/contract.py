@@ -50,6 +50,10 @@ MAX_ANGULAR_VEL = 1.5
 PHYSICS_STEP_SIZE = 0.001
 """Seconds. Must match ``<max_step_size>`` in worlds/arena.sdf."""
 
+PHYSICS_STEP_NS = 1_000_000
+"""``PHYSICS_STEP_SIZE`` in integer nanoseconds. The env accumulates sim time in
+these, never in float seconds -- see ``STEP_DURATION_NS``."""
+
 SIM_STEPS_PER_ACTION = 50
 """Iterations advanced per env step."""
 
@@ -107,6 +111,41 @@ means the arena or the clearance changed such that free space is gone -- and a
 silently relaxed clearance produces episodes that start in collision, which
 reads as "the policy cannot learn" rather than as the configuration error it
 is."""
+
+BRAKE_ITERATIONS = 1000
+"""Physics iterations of zero-velocity command before the reset teleport.
+
+The robot must be at rest when an episode starts, or the episode inherits
+momentum from the end of the previous one and a fixed seed stops reproducing.
+DiffDrive drives the wheels to zero under its 10 rad/s^2 acceleration limit, so
+8 rad/s (full speed) decays in 0.8 s; 1000 iterations is that plus margin, and
+it settles to a measured 0.000 mm of residual drift.
+
+Why not ``ControlWorld(reset.all)``, which is what CONTRACTS.md asks for
+-------------------------------------------------------------------------
+Both failure modes below were measured against Harmonic in this container, not
+inferred:
+
+1. It is asynchronous. It answers immediately and then swallows the ``set_pose``
+   that has to follow it -- never answering that request at all -- roughly half
+   the time. No ordering barrier closes the window: ``/clock`` returns to zero
+   well before the entity manager will accept a pose. Resending the teleport
+   does work, at about 0.4 s per reset.
+2. Under repeated use it wedges the server outright. In a full test run,
+   ``/world/arena/control`` itself stopped answering after a handful of
+   episodes, and every subsequent test failed on a 10 s service timeout.
+
+(2) is disqualifying for training, which needs thousands of resets. Braking is
+synchronous, needs no barrier, and has never failed in this codebase.
+
+What it costs: a world reset also restores wheel joint angles, so two episodes
+would begin in a bit-identical simulator state. Braking leaves the wheels at
+whatever rotation the last episode ended on, and the contact solver amplifies
+that into millimetres of trajectory divergence over tens of steps. Episodes are
+reproducible in their initial state and in the short term, but not bit-identical
+over a full rollout -- a documented deviation from CONTRACTS.md, and the reason
+``test_same_seed_and_actions_give_identical_observations`` grades the two
+failure modes separately rather than asserting equality."""
 
 ROBOT_SPAWN_Z = 0.06
 """Metres. Teleport height, matching the ``<include>`` pose in worlds/arena.sdf.

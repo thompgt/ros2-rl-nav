@@ -66,6 +66,38 @@ deliberately against.
   `assemble_observation` from `robot_rl_env.observation`. Training/inference
   preprocessing divergence is a silent, unloggable failure.
 - **Never mean-pool the LiDAR.** Min-pool. See `CONTRACTS.md`.
+- **Never call `ControlWorld(reset.all)` in the episode loop.** It is
+  asynchronous in Harmonic: it answers immediately and then swallows the
+  `set_pose` that follows it, about one reset in three, with no barrier that
+  closes the window — `/clock` returns to zero well before the entity manager
+  will accept a pose. `reset()` brakes the robot to a stop and teleports
+  instead. See `contract.BRAKE_ITERATIONS`.
+- **Never treat "a message arrived" as "the world has advanced".** The barrier
+  is the *stamp*. Advancing many iterations at once queues a burst of samples,
+  and the first one delivered afterwards is the **oldest** of that burst — so a
+  sequence-counter barrier reads a scan from the middle of the advance while
+  believing it has the one from the end. That is the staleness bug, wearing the
+  costume of the fix for it.
+- **Never wait for sensor data from a paused world.** A paused Gazebo publishes
+  nothing at all — sensors update in `PostUpdate`, which a paused world never
+  runs. Step it first, or block until the timeout on a simulator that is
+  working perfectly.
+
+## Frames: world in, odom out
+
+Reset sampling and `set_pose` work in **world** coordinates — `arena.py` is
+where the walls and obstacles are. The observation is built in the **odom**
+frame, because that is the only frame `policy_node.py` will have on a robot.
+
+The two are bridged once, in `reset()`: the goal is expressed relative to the
+robot's sampled world pose, then re-planted at whatever pose odometry reports
+after the teleport. Odometry is dead-reckoned and a teleport does **not** move
+it, so anchoring on the measured odom pose rather than assuming it reads zero
+is what keeps the goal where it was sampled.
+
+The practical consequence, which surprises everyone once: teleporting the robot
+mid-episode does not change `distance_to_goal`. Tests that need the robot at
+the goal move the goal.
 
 ## Layout
 

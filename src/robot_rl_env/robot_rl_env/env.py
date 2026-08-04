@@ -35,6 +35,16 @@ This is exact whatever odom happens to read after the reset, which is the point
 internals, and it would fail silently, as a goal quietly displaced by however
 much odometry drifted.
 
+Reset, and a documented deviation from CONTRACTS.md
+--------------------------------------------------
+CONTRACTS.md says reset restores the world to its initial state. This does not
+call ``ControlWorld(reset.all)``: measured against Harmonic, that service drops
+the ``set_pose`` that has to follow it about half the time, and wedges the
+server outright under repeated use. An episode brakes the robot to a stop and
+teleports instead. The cost is that episodes are reproducible in their initial
+state but not bit-identical over a full rollout. See
+``contract.BRAKE_ITERATIONS``.
+
 Known race
 ----------
 ``/cmd_vel`` is published a moment before the ``multi_step`` service call, and
@@ -148,7 +158,25 @@ class RobotNavEnv(gym.Env):
             # Paused is the resting state of this world. Assert it rather than
             # assume the launch file was given paused:=true.
             self._sim.pause()
+            # ... and then step it once, because a paused Gazebo publishes
+            # nothing at all: sensors update in PostUpdate, which a paused
+            # world never runs. Waiting for a first message without this hangs
+            # until the timeout on a simulator that is working perfectly.
+            #
+            # Doing it here rather than leaving it to the first reset() means
+            # the constructor exercises the full loop -- services, stepping,
+            # both sensor topics, the QoS match -- and reports a broken bridge
+            # at construction rather than as a mystery hang mid-episode.
+            self._sim_ns = 0
+            self._advance(contract.SIM_STEPS_PER_ACTION)
             self._obs.wait_for_first_message(timeout=service_timeout)
+            # Baseline against the simulator's own clock. The launch file starts
+            # the world paused at t = 0 and nothing else advances it, so this
+            # normally agrees with the count above -- but attaching to a world
+            # that has already been stepped is a legitimate thing to do, and an
+            # env that assumed t = 0 would wait on stamps already in the past
+            # and read a stale scan on every step without ever timing out.
+            self._sim_ns = max(self._sim_ns, self._obs.sim_time_ns())
         except BaseException:
             # A constructor that raises after starting the executor leaves a
             # spinning thread and a DDS participant behind, and the usual cause
@@ -163,7 +191,6 @@ class RobotNavEnv(gym.Env):
         self._prev_action = np.zeros(contract.ACT_DIM, dtype=np.float32)
         self._prev_distance = 0.0
         self._step_count = 0
-        self._target_ns = 0
         self._needs_reset = True
 
     # --- gymnasium API --------------------------------------------------------
@@ -176,27 +203,21 @@ class RobotNavEnv(gym.Env):
 
         (rx, ry), ryaw, goal_world = arena.sample_episode(self.np_random, goal_radius)
 
-        # Zero the command *before* the world resets, so the queued velocity
-        # from the last step of the previous episode cannot carry over into the
-        # first iteration of this one.
+        # Brake to a stop, then teleport. Not ControlWorld(reset.all), which
+        # CONTRACTS.md asks for: it drops the set_pose that follows it about
+        # half the time and wedges the server outright under repeated use. See
+        # contract.BRAKE_ITERATIONS for both measurements and what this costs.
         self._publish_velocity(0.0, 0.0)
-        self._sim.reset_world()
+        self._advance(contract.BRAKE_ITERATIONS)
+
         self._sim.set_entity_pose(contract.ROBOT_NAME, rx, ry, ryaw)
 
-        # Snapshot after reset_world() returns: everything the simulator sent
-        # before the reset has been delivered by then, so "strictly newer than
-        # this" means "generated after the reset". See ObservationAssembler.sequence.
-        seq = self._obs.sequence()
         # set_pose is queued by UserCommands and applied on the next iteration,
-        # so this step both applies the teleport and repopulates the sensors.
-        self._sim.step(contract.SIM_STEPS_PER_ACTION)
+        # so this advance both lands the teleport and produces the first scan
+        # from the new pose.
+        self._advance(contract.SIM_STEPS_PER_ACTION)
 
-        sample = self._obs.wait_for_sample(0, min_seq=seq, timeout=self._obs_timeout)
-
-        # Re-baseline sim time on the stamp actually observed rather than
-        # assuming reset_world zeroed the clock. Every subsequent step target is
-        # this plus an exact integer number of STEP_DURATION_NS.
-        self._target_ns = sample.stamp_ns
+        sample = self._obs.wait_for_sample(self._sim_ns, timeout=self._obs_timeout)
 
         self._start_world = (rx, ry, ryaw)
         self._goal_world = goal_world
@@ -225,16 +246,13 @@ class RobotNavEnv(gym.Env):
         # 1. act
         self._publish_velocity(*self.scale_action(action))
 
-        # 2. advance exactly one step's worth of sim time. Integer nanoseconds:
-        #    accumulating 0.05 in float 500 times drifts past a sensor stamp by
-        #    an ULP and hangs the last step of long episodes.
-        self._target_ns += contract.STEP_DURATION_NS
-        self._sim.step(contract.SIM_STEPS_PER_ACTION)
+        # 2. advance exactly one step's worth of sim time
+        self._advance(contract.SIM_STEPS_PER_ACTION)
 
         # 3. block until the sensors have caught up, or raise
         self._step_count += 1
         obs, info = self._obs.get_obs(
-            self._target_ns,
+            self._sim_ns,
             self._goal_odom,
             action,
             self._step_count,
@@ -306,6 +324,20 @@ class RobotNavEnv(gym.Env):
         v = contract.MAX_LINEAR_VEL * (float(a[0]) + 1.0) / 2.0
         omega = contract.MAX_ANGULAR_VEL * float(a[1])
         return v, omega
+
+    def _advance(self, iterations: int) -> None:
+        """Step the simulator and track the sim time it now holds.
+
+        Sim time is accumulated here as an integer count of physics iterations
+        rather than read back from ``/clock``, because it has to be known
+        *before* the data it labels arrives: it is the barrier ``get_obs``
+        waits on. Integer nanoseconds, never float seconds -- ``target += 0.05``
+        five hundred times accumulates error, and the error only has to exceed a
+        sensor stamp by one ULP for the wait to hang on the last step of a long
+        episode and look like flakiness.
+        """
+        self._sim.step(iterations)
+        self._sim_ns += iterations * contract.PHYSICS_STEP_NS
 
     def _publish_velocity(self, v: float, omega: float) -> None:
         msg = Twist()

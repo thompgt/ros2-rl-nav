@@ -87,10 +87,8 @@ class ObservationAssembler(Node):
 
         self._scan_stamp_ns: int | None = None
         self._scan_pooled: np.ndarray | None = None
-        self._scan_seq: int = 0
         self._odom_stamp_ns: int | None = None
         self._odom_pose: tuple[float, float, float] | None = None
-        self._odom_seq: int = 0
         self._clock_ns: int = 0
 
         self.create_subscription(
@@ -113,7 +111,6 @@ class ObservationAssembler(Node):
         with self._cv:
             self._scan_pooled = pooled
             self._scan_stamp_ns = stamp
-            self._scan_seq += 1
             self._cv.notify_all()
 
     def _on_odom(self, msg: Odometry) -> None:
@@ -124,7 +121,6 @@ class ObservationAssembler(Node):
         with self._cv:
             self._odom_pose = pose
             self._odom_stamp_ns = stamp
-            self._odom_seq += 1
             self._cv.notify_all()
 
     def _on_clock(self, msg: Clock) -> None:
@@ -137,21 +133,6 @@ class ObservationAssembler(Node):
     def sim_time_ns(self) -> int:
         with self._cv:
             return self._clock_ns
-
-    def sequence(self) -> tuple[int, int]:
-        """``(scan_count, odom_count)`` received so far.
-
-        The env snapshots this immediately after ``reset_world()`` returns and
-        then requires the next observation to be strictly newer. Without it,
-        reset is unsound: resetting the world sets sim time back to zero, so a
-        message left over from the *previous* episode carries a stamp far in the
-        future of the post-reset target and satisfies a ``stamp >= target``
-        barrier instantly. The first observation of the episode would then be
-        the last observation of the one before it -- deterministic, plausible,
-        and completely wrong.
-        """
-        with self._cv:
-            return (self._scan_seq, self._odom_seq)
 
     def wait_for_first_message(self, timeout: float = 30.0) -> None:
         """Block until every topic has produced at least one message, or raise."""
@@ -168,19 +149,21 @@ class ObservationAssembler(Node):
         self,
         min_stamp_ns: int,
         *,
-        min_seq: tuple[int, int] | None = None,
         timeout: float = contract.OBS_TIMEOUT,
     ) -> Sample:
         """Block until both sensors reach ``min_stamp_ns``, then snapshot them.
 
-        ``min_seq`` additionally requires each topic to have delivered a message
-        it had not delivered when that sequence was taken -- see
-        :meth:`sequence`.
+        The stamp is the barrier, and nothing else may stand in for it. "Wait
+        for a message newer than the one I last saw" is the tempting substitute
+        and it is unsound: advancing the world by many iterations at once (the
+        reset brake is 1000) queues a burst of samples, and the first to arrive
+        afterwards is the *oldest* of that burst -- a scan from the middle of
+        the advance, presented as the one from the end. Sim time here only ever
+        moves forward, so the stamp alone is sufficient as well as necessary.
 
         Raises ``ObservationTimeout`` if the data does not arrive. It never
         returns stale data. See the module docstring.
         """
-        want_scan, want_odom = (-1, -1) if min_seq is None else min_seq
 
         def fresh() -> bool:
             return (
@@ -188,8 +171,6 @@ class ObservationAssembler(Node):
                 and self._odom_stamp_ns is not None
                 and self._scan_stamp_ns >= min_stamp_ns
                 and self._odom_stamp_ns >= min_stamp_ns
-                and self._scan_seq > want_scan
-                and self._odom_seq > want_odom
             )
 
         with self._cv:
@@ -238,11 +219,9 @@ class ObservationAssembler(Node):
         prev_action,
         step_count: int,
         timeout: float = contract.OBS_TIMEOUT,
-        *,
-        min_seq: tuple[int, int] | None = None,
     ) -> tuple[np.ndarray, dict]:
         """:meth:`wait_for_sample` followed by :meth:`assemble`."""
-        sample = self.wait_for_sample(min_stamp_ns, min_seq=min_seq, timeout=timeout)
+        sample = self.wait_for_sample(min_stamp_ns, timeout=timeout)
         return self.assemble(sample, goal_xy, prev_action, step_count)
 
     def _diagnose(self, timeout: float, min_stamp_ns: int | None = None) -> str:

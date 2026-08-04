@@ -84,10 +84,27 @@
             <max>10.0</max>
             <resolution>0.01</resolution>
           </range>
+          <!--
+            NO SENSOR NOISE, DELIBERATELY.
+
+            Gazebo's noise draws from a process-global RNG that no service
+            resets and no launch argument seeds. With stddev 0.01 m, two resets
+            to the identical pose return different scans, so CONTRACTS.md's
+            bit-identical determinism requirement becomes unsatisfiable. That
+            requirement is the canary for async leakage in the step loop, and
+            it is also a hard assertion inside Gymnasium's own check_env. The
+            choice is between a reproducibility guarantee and 1 cm of range
+            jitter, and the guarantee is worth more: it is what makes a
+            divergence between two identical rollouts mean something.
+
+            Phase 4 is where noise belongs. Enabling it in the deployment world
+            only, and measuring the success-rate drop, is a better experiment
+            than training through it and never knowing what it cost.
+          -->
           <noise>
             <type>gaussian</type>
             <mean>0.0</mean>
-            <stddev>0.01</stddev>
+            <stddev>0.0</stddev>
           </noise>
         </lidar>
       </sensor>

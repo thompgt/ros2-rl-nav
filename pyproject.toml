@@ -4,7 +4,17 @@
 [tool.pytest.ini_options]
 testpaths = ["src/robot_rl_env/test"]
 python_files = ["test_*.py"]
-addopts = "-ra --strict-markers"
+# -p no:launch_testing / no:launch_ros: ROS 2 Jazzy ships two pytest plugins
+# written against pytest 7. Under the pytest the Dockerfile installs, one has a
+# hookimpl signature pytest rejects outright and the other registers a hook
+# that no longer exists -- so every pytest run in the container dies before
+# collection, with an INTERNALERROR that names pluggy rather than ROS.
+#
+# The names are the pytest11 *entry point* names, not the distribution names:
+# launch-testing-ros registers itself as `launch_ros`. `-p no:launch-testing-ros`
+# is silently accepted and does nothing. Nothing here uses either plugin, and
+# blocking one that is not installed (CI, the Windows host) is a no-op.
+addopts = "-ra --strict-markers -p no:launch_testing -p no:launch_ros"
 # Any test that hangs is a step-synchronization bug, and a hung test is
 # indistinguishable from a slow one in CI. Fail loudly instead.
 timeout = 120

@@ -111,6 +111,7 @@ class SimControl(Node):
         y: float,
         yaw: float,
         z: float = contract.ROBOT_SPAWN_Z,
+        timeout: float | None = None,
     ) -> None:
         """Teleport a model. Takes effect on the next physics iteration.
 
@@ -125,7 +126,7 @@ class SimControl(Node):
         pose.orientation.z = math.sin(yaw / 2.0)
         pose.orientation.w = math.cos(yaw / 2.0)
         request.pose = pose
-        self._call(self._set_pose, request, contract.SET_POSE_SERVICE)
+        self._call(self._set_pose, request, contract.SET_POSE_SERVICE, timeout=timeout)
 
     # --- plumbing -------------------------------------------------------------
 
@@ -134,18 +135,19 @@ class SimControl(Node):
         request.world_control = world_control
         self._call(self._control, request, contract.WORLD_CONTROL_SERVICE)
 
-    def _call(self, client, request, name: str) -> None:
+    def _call(self, client, request, name: str, timeout: float | None = None) -> None:
         if not client.service_is_ready():
             raise SimControlError(f"{name} is not available")
 
+        timeout = SERVICE_TIMEOUT if timeout is None else timeout
         future = client.call_async(request)
         done = threading.Event()
         future.add_done_callback(lambda _f: done.set())
 
-        if not done.wait(SERVICE_TIMEOUT):
+        if not done.wait(timeout):
             future.cancel()
             raise SimControlError(
-                f"{name} did not respond within {SERVICE_TIMEOUT}s. The "
+                f"{name} did not respond within {timeout}s. The "
                 f"simulator is wedged or the executor is not spinning this node."
             )
 
