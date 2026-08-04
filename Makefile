@@ -26,8 +26,12 @@ test:
 verify:
 	$(COMPOSE) run --rm verify
 
+# make verify2 EPISODES=25 to shorten the run. The episode count cannot be
+# appended to `compose run <service>` -- that replaces the service command
+# rather than adding to it.
+EPISODES ?= 100
 verify2:
-	$(COMPOSE) run --rm verify2
+	$(COMPOSE) run --rm verify2 bash -lc "scripts/verify_phase2.sh $(EPISODES)"
 
 lint:
 	$(COMPOSE) run --rm dev bash -lc "ruff check src scripts"

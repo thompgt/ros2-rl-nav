@@ -12,8 +12,12 @@
 
 set -uo pipefail
 
+# ROS's setup scripts read unset variables, so -u has to come off around them
+# or sourcing dies on AMENT_TRACE_SETUP_FILES before anything runs.
+set +u
 source /opt/ros/jazzy/setup.bash
 [ -f /ws/install/setup.bash ] && source /ws/install/setup.bash
+set -u
 
 PASS=0
 FAIL=0
@@ -45,7 +49,9 @@ if ! colcon build --symlink-install --event-handlers console_cohesion- > /tmp/co
   tail -40 /tmp/colcon.log
   exit 1
 fi
+set +u
 source /ws/install/setup.bash
+set -u
 echo "build ok"
 echo
 

@@ -87,38 +87,34 @@ def random_episodes(env: RobotNavEnv, n_episodes: int) -> dict:
     }
 
 
-def measure_actuation_lag(env: RobotNavEnv, n_steps: int = 40) -> float:
-    """Milliseconds of sim time between a published command and its application.
+def measure_per_step_travel(env: RobotNavEnv, n_steps: int = 4) -> list[float]:
+    """Metres travelled by each of the first few steps of full-forward command.
 
-    Publishing ``/cmd_vel`` and calling the ``multi_step`` service are two
-    different paths through ``ros_gz_bridge``, and their relative ordering is
-    not guaranteed. If the command consistently lands one env step late, the
-    policy is trained on an action delay it will not have at deployment.
+    Publishing ``/cmd_vel`` and calling the ``multi_step`` service take two
+    different paths through ``ros_gz_bridge``, and nothing guarantees the
+    velocity command is applied to the iterations it was meant to drive. If it
+    consistently lands one env step late, the policy trains against an action
+    delay that will not exist at deployment, and no other check would notice.
 
-    Commanding full speed from rest and integrating the DiffDrive acceleration
-    limit gives a closed-form displacement; the shortfall, divided by the final
-    speed, is the lag. Dead-reckoned odometry is the right measurement here
-    precisely because it reports commanded motion rather than ground truth.
+    Measured by counting leading steps that cover no ground, rather than
+    against a closed-form dynamics model. The model version of this check was
+    wrong in exactly the way such checks usually are: it assumed the DiffDrive
+    ``max_wheel_acceleration`` limit shaped the ramp, reported a confident
+    -399 ms, and the truth was that the plugin reaches commanded speed at once.
+    Counting zero-displacement steps assumes nothing about the dynamics.
     """
     _, info = env.reset(seed=1234)
-    x0, y0, _ = info["robot_pose"]
+    previous = info["robot_pose"][:2]
 
+    travel = []
     for _ in range(n_steps):
         _, _, terminated, truncated, info = env.step(np.array([1.0, 0.0], np.float32))
+        current = info["robot_pose"][:2]
+        travel.append(math.dist(previous, current))
+        previous = current
         if terminated or truncated:  # ran into something; the measurement is void
-            return float("nan")
-
-    x1, y1, _ = info["robot_pose"]
-    travelled = math.dist((x0, y0), (x1, y1))
-
-    v_max = contract.MAX_LINEAR_VEL
-    # wheel rad/s^2 * wheel radius, both from models/diffbot/model.sdf
-    accel = 10.0 * 0.05
-    t_total = n_steps * contract.STEP_DURATION
-    t_ramp = min(v_max / accel, t_total)
-    expected = 0.5 * accel * t_ramp**2 + v_max * (t_total - t_ramp)
-
-    return (expected - travelled) / v_max * 1000.0
+            return []
+    return travel
 
 
 def main() -> int:
@@ -132,16 +128,24 @@ def main() -> int:
     env = RobotNavEnv()
     try:
         print("--- check 1: command timing ---")
-        lag_ms = measure_actuation_lag(env)
-        if math.isnan(lag_ms):
+        travel = measure_per_step_travel(env)
+        if not travel:
             check(False, "lag measurement aborted -- the robot terminated mid-run")
         else:
-            print(f"        implied actuation lag: {lag_ms:+.1f} ms of sim time")
+            print(
+                "        travel per step under a full-forward command from rest: "
+                + ", ".join(f"{t * 1000:.1f} mm" for t in travel)
+            )
+            # A step at full speed covers MAX_LINEAR_VEL * STEP_DURATION = 20 mm.
+            # Half of that is far above any settling jitter and far below a step
+            # that actually ran under the command.
+            threshold = contract.MAX_LINEAR_VEL * contract.STEP_DURATION / 2
+            late = next((i for i, t in enumerate(travel) if t > threshold), len(travel))
             check(
-                abs(lag_ms) < contract.STEP_DURATION * 1000.0 / 2,
-                f"command lands within half an env step ({lag_ms:+.1f} ms). "
-                f"A full-step lag would mean /cmd_vel is applied after the "
-                f"multi_step it was meant to drive.",
+                late == 0,
+                f"/cmd_vel drives the very first step after it is published "
+                f"(first moving step: index {late}). An index of 1 would mean "
+                f"every action is applied one env step late.",
             )
         print()
 
