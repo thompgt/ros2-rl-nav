@@ -15,10 +15,6 @@ therefore harmless to whatever runs next.
 """
 
 import math
-import os
-import signal
-import subprocess
-import time
 
 import numpy as np
 import pytest
@@ -27,7 +23,7 @@ pytest.importorskip("rclpy", reason="ROS 2 is not available on this host")
 
 from gymnasium.utils.env_checker import check_env  # noqa: E402
 
-from robot_rl_env import arena, contract  # noqa: E402
+from robot_rl_env import arena, contract, sim_launcher  # noqa: E402
 from robot_rl_env.env import RobotNavEnv  # noqa: E402
 from robot_rl_env.observation import from_body_frame  # noqa: E402
 
@@ -41,41 +37,20 @@ the environment rather than in the fixture."""
 
 @pytest.fixture(scope="session")
 def simulator():
-    """Launch the arena headless and paused for the whole session."""
-    proc = subprocess.Popen(
-        ["ros2", "launch", "robot_rl_env", "world.launch.py", "headless:=true"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        # Own process group: `ros2 launch` spawns gz and two bridge nodes, and
-        # killing only the parent leaves them holding the DDS ports, which
-        # makes the *next* test session fail for reasons that look unrelated.
-        preexec_fn=os.setsid,
-    )
+    """Launch the arena headless and paused for the whole session.
 
-    deadline = time.time() + LAUNCH_TIMEOUT
-    while time.time() < deadline:
-        if proc.poll() is not None:
-            pytest.fail(f"launch exited early:\n{proc.stdout.read()}")
-        listing = subprocess.run(
-            ["ros2", "service", "list"], capture_output=True, text=True, timeout=20
-        ).stdout
-        if contract.WORLD_CONTROL_SERVICE in listing and "/scan" in subprocess.run(
-            ["ros2", "topic", "list"], capture_output=True, text=True, timeout=20
-        ).stdout:
-            break
-        time.sleep(1.0)
-    else:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        pytest.fail(f"simulator did not come up within {LAUNCH_TIMEOUT}s")
-
-    yield proc
-
-    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    Through ``sim_launcher``, which is also what training uses to start its
+    parallel workers -- so the launch and readiness path these tests exercise
+    is the one Phase 3 depends on, rather than a second copy that agrees with
+    it today.
+    """
+    sim = sim_launcher.Simulator(index=0, timeout=LAUNCH_TIMEOUT)
     try:
-        proc.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        sim.start()
+    except (RuntimeError, TimeoutError) as exc:
+        pytest.fail(str(exc))
+    yield sim
+    sim.stop()
 
 
 @pytest.fixture(scope="module")
