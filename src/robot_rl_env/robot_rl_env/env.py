@@ -192,6 +192,28 @@ class RobotNavEnv(gym.Env):
         self._prev_distance = 0.0
         self._step_count = 0
         self._needs_reset = True
+        self._curriculum_radius: float | None = None
+
+    def set_curriculum_radius(self, radius: float | None) -> None:
+        """Cap the sampled start-goal distance for every subsequent reset.
+
+        The curriculum has to be driven from outside the episode loop, and SB3's
+        ``VecEnv.reset()`` takes no ``options`` -- there is no way to pass
+        ``goal_radius`` through a vectorized reset. So the cap is state on the
+        env, set through ``VecEnv.env_method("set_curriculum_radius", r)``.
+
+        ``None`` restores full-arena sampling. An explicit ``options`` on a
+        single reset still wins, which is what keeps evaluation independent of
+        whatever stage training has reached.
+        """
+        if radius is not None and radius < contract.MIN_START_GOAL_DISTANCE:
+            raise ValueError(
+                f"curriculum radius {radius} is below the "
+                f"{contract.MIN_START_GOAL_DISTANCE} m minimum start-goal "
+                f"distance; sampling would exhaust its attempts and raise on "
+                f"every reset."
+            )
+        self._curriculum_radius = radius
 
     # --- gymnasium API --------------------------------------------------------
 
@@ -211,7 +233,7 @@ class RobotNavEnv(gym.Env):
         """
         super().reset(seed=seed)
         options = options or {}
-        goal_radius = options.get("goal_radius")
+        explicit_radius = options.get("goal_radius")
         start, goal = options.get("start"), options.get("goal")
 
         if (start is None) != (goal is None):
@@ -220,12 +242,17 @@ class RobotNavEnv(gym.Env):
                 "and sampling the other yields an episode that is neither "
                 "reproducible nor uniformly random."
             )
-        if start is not None and goal_radius is not None:
+        if start is not None and explicit_radius is not None:
             raise ValueError(
                 "options 'goal_radius' and 'start'/'goal' are mutually "
                 "exclusive: the curriculum cap has no meaning for an episode "
                 "whose goal is already fixed."
             )
+
+        # An explicit cap beats the curriculum, and a fixed episode ignores
+        # both -- so an evaluation reset returns the same episode whatever
+        # stage training has reached.
+        goal_radius = explicit_radius if explicit_radius is not None else self._curriculum_radius
 
         if start is None:
             (rx, ry), ryaw, goal_world = arena.sample_episode(self.np_random, goal_radius)
