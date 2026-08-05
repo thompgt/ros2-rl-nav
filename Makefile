@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint train evaluate board deploy world clean
+.PHONY: help build shell test verify verify2 lint train evaluate export-policy board deploy world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -12,6 +12,7 @@ help:
 	@echo "world    - launch the arena headless (paused), for manual poking"
 	@echo "train    - Phase 3 training: make train ALGO=sac SEED=0 ENVS=4"
 	@echo "evaluate - Phase 3 evaluation: make evaluate MODEL=<path to .zip>"
+	@echo "export-policy - TorchScript export: make export-policy MODEL=<path to .zip>"
 	@echo "board    - TensorBoard over runs/ on port 6006"
 	@echo "deploy   - Phase 4"
 	@echo "clean    - remove colcon build artifacts"
@@ -64,6 +65,17 @@ evaluate:
 	  && source install/setup.bash \
 	  && python3 -m robot_rl_env.evaluate --model $(MODEL) \
 	     --json runs/$(ALGO)-seed$(SEED)/eval.json"
+
+# make export-policy MODEL=runs/sac-seed0/best/best_model.zip
+#
+# Named `export-policy` rather than `export` because `export` is a GNU make
+# directive and a target sharing its name is a trap for whoever adds the next
+# one. Writes <run dir>/policy.pt, and refuses to write anything if the traced
+# graph disagrees with the trained policy.
+export-policy:
+	$(COMPOSE) run --rm train bash -lc "colcon build --symlink-install \
+	  && source install/setup.bash \
+	  && python3 -m robot_rl_env.export_policy --model $(MODEL)"
 
 # TensorBoard on all runs at once, so seeds and algorithms are compared on one
 # axis rather than by flipping between screenshots.
