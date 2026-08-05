@@ -19,7 +19,12 @@ jobs:
           python-version: "3.12"
 
       - name: Install test dependencies
-        run: pip install pytest pytest-timeout ruff numpy
+        # gymnasium is included so the env-construction wrappers (vec_env) are
+        # actually exercised here rather than skipped; it is a small pure-python
+        # install. stable-baselines3 is not: it pulls torch, which would dominate
+        # the fast path. The SB3-dependent tests skip themselves and run under
+        # `make test`.
+        run: pip install pytest pytest-timeout ruff numpy gymnasium
 
       - name: Lint
         run: ruff check src scripts

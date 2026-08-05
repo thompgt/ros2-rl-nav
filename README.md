@@ -4,10 +4,12 @@ A differential-drive robot in Gazebo Harmonic, exposed as a Gymnasium
 environment over ROS 2 Jazzy, trained with SAC/PPO, and redeployed as a
 standalone ROS 2 inference node.
 
-> **Status: Phase 1 of 5.** Simulation and bridge are up and verified. The Gym
-> environment (Phase 2) is scaffolded but not implemented. There are no
-> training results yet — the results table below is deliberately empty rather
-> than aspirational.
+> **Status: Phase 3 of 5, mid-flight.** Simulation, bridge and the Gym
+> environment are done and verified against a live Gazebo. The training stack
+> (curriculum, parallel workers, held-out evaluation, `train.py`,
+> `evaluate.py`) is written, tested, and smoke-run end to end — but **no real
+> training run has happened yet**, so the results table below is deliberately
+> empty rather than aspirational.
 
 ## The design decision this project is built around
 
@@ -46,8 +48,17 @@ Docker Desktop, headless.
 ```bash
 make build     # build the ROS 2 Jazzy + Gazebo Harmonic image
 make verify    # Phase 1 bridge verification — PASS/FAIL per check
+make verify2   # Phase 2 exit criteria — episodes, throughput, memory, timing
 make test      # colcon build + pytest
 make shell     # interactive container shell, repo mounted at /ws
+```
+
+Training and evaluation:
+
+```bash
+make train ALGO=sac SEED=0 ENVS=4                      # hours; run it yourself
+make evaluate MODEL=runs/sac-seed0/best/best_model.zip # prints metrics, writes JSON
+make board                                             # TensorBoard on :6006
 ```
 
 ## Layout
@@ -62,6 +73,8 @@ make shell     # interactive container shell, repo mounted at /ws
 | `src/robot_rl_env/models/diffbot/` | Chassis, diff drive, 360-beam LiDAR |
 | `src/robot_rl_env/config/bridge.yaml` | `ros_gz_bridge` topic mapping |
 | `scripts/verify_phase1.sh` | Turns bridge silence into a non-zero exit code |
+| `src/robot_rl_env/robot_rl_env/eval_set.py` | The held-out evaluation episodes, generated from a seed training never uses |
+| `src/robot_rl_env/robot_rl_env/hyperparams.py` | SAC/PPO configuration and every run-shaping constant |
 
 ## Environment contract
 
@@ -79,8 +92,15 @@ anti-reward-hacking escalation ladder, is in [`CONTRACTS.md`](CONTRACTS.md).
 
 ## Results
 
-Phase 3 not started. This table gets filled with mean ± std over **three seeds
-per algorithm** — single-seed RL numbers aren't worth reporting.
+No training run has been executed yet. This table gets filled with mean ± std
+over **three seeds per algorithm** — single-seed RL numbers aren't worth
+reporting.
+
+Every run is scored on the same 100 fixed episodes, generated from a seed
+training never uses, so two runs differ by the policy rather than by which
+episodes they happened to draw. Alongside success rate, evaluation reports
+collision rate and *timeout* rate: a policy that learns to stand still has an
+excellent collision rate and is worthless, and only the third number shows it.
 
 | Algorithm | Success rate | Mean path length | Collision rate |
 |---|---|---|---|

@@ -35,7 +35,7 @@ Bridge misconfigurations produce **silence, not errors**. An agent cannot see
 silence. This is the single most common place to lose three days — hence
 `scripts/verify_phase1.sh`, which turns each check into a printed PASS/FAIL.
 
-## Phase 2 — The Gym environment (the real work)
+## Phase 2 — The Gym environment (the real work) ✅
 
 Build in this order, testing each layer:
 
@@ -61,14 +61,19 @@ Tests to write first:
 crashing, or leaking memory. Log `sim_time / wall_time`; need ≥ 5× for training
 to be practical. Below 1×, profile before proceeding.
 
-## Phase 3 — Training (mostly waiting)
+## Phase 3 — Training (mostly waiting) — built, not yet run
 
-- `train.py` on SB3 with configs, TensorBoard, checkpointing, `VecNormalize`
+Everything below exists and is tested; what remains is executing the runs.
+
+- `train.py` on SB3 with configs, TensorBoard, checkpointing, `VecNormalize` ✅
 - `SubprocVecEnv` with N parallel Gazebo instances on separate `GZ_PARTITION`
-  values and ROS domain IDs
-- `EvalCallback` on a held-out set of fixed start/goal pairs
-- `evaluate.py` → success rate, mean episode length, mean path length over 100
-  deterministic episodes
+  values and ROS domain IDs ✅ (`sim_launcher.py`, `vec_env.py`)
+- `EvalCallback` on a held-out set of fixed start/goal pairs ✅ (`eval_set.py`;
+  goals are capped at `MAX_EVAL_DISTANCE` because 500 steps at 0.4 m/s covers
+  10 m and the arena diagonal is 14.15 m)
+- `evaluate.py` → success rate, collision rate, timeout rate, mean episode
+  length, mean path length and path efficiency over 100 deterministic
+  episodes ✅
 
 SAC first (~150k steps), then PPO for comparison. **Three seeds minimum per
 algorithm.** Reporting single-seed RL results is a tell that you haven't done

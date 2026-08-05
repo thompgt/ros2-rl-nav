@@ -113,6 +113,13 @@ src/robot_rl_env/
     observation.py        Phase 2b — PURE, SHARED obs assembly (train + deploy)
     observation_node.py   Phase 2b — ROS subscriber layer around it
     env.py                Phase 2c — RobotNavEnv(gymnasium.Env)
+    eval_set.py           Phase 3 — PURE, the held-out evaluation episodes
+    hyperparams.py        Phase 3 — PURE, SAC/PPO config and run constants
+    sim_launcher.py       Phase 3 — one isolated simulator per worker
+    vec_env.py            Phase 3 — vec env + fixed-episode evaluation env
+    callbacks.py          Phase 3 — curriculum, success/collision/timeout logs
+    train.py              Phase 3 — entry point
+    evaluate.py           Phase 3 — deterministic scoring, prints + JSON
     policy_node.py        Phase 4 — ROS 2 inference node (scaffolding only)
   worlds/arena.sdf        10x10 m arena, 7 obstacles, 1 ms physics step
   models/diffbot/         chassis, diff drive, 360-beam LiDAR
@@ -124,8 +131,8 @@ scripts/verify_phase2.sh  launches the world, then runs phase2_checks.py
 scripts/phase2_checks.py  Phase 2 exit criteria as PASS/FAIL lines
 ```
 
-`train.py` and `evaluate.py` (Phase 3) do not exist yet; `docker-compose.yml`
-already has `train`/`deploy` services pointing at them.
+`policy_node.py` is scaffolding: its `main` raises, and its docstring is the
+contract for whoever implements Phase 4.
 
 ## Pure core, ROS shell
 
@@ -162,7 +169,9 @@ make verify2        # Phase 2 exit criteria: episodes, throughput, memory, timin
 make verify2 EPISODES=25   # shorter run; the count cannot be appended to the
                            # compose service command, which is why it is a var
 make world          # launch the arena headless and paused, for manual poking
-make train          # Phase 3
+make train ALGO=sac SEED=0 ENVS=4    # Phase 3 training � hours; launch it yourself
+make evaluate MODEL=runs/sac-seed0/best/best_model.zip
+make board          # TensorBoard over runs/ on :6006
 make deploy         # Phase 4
 make clean          # rm -rf build install log
 ```
@@ -184,7 +193,7 @@ the package root**, because there is no colcon install to put `robot_rl_env` on
 the path:
 
 ```powershell
-cd src/robot_rl_env; python -m pytest test -q   # 40 passed, test_env skipped
+cd src/robot_rl_env; python -m pytest test -q   # 100 passed, test_env skipped
 ```
 
 From the repo root the same command dies in collection with
@@ -206,6 +215,31 @@ Two gotchas that cost real time if you meet them cold:
 - ROS setup scripts read unset variables, so `set -u` in a shell script must be
   lifted around `source /opt/ros/jazzy/setup.bash`.
 
+## Phase 3: parallel workers, and what evaluation is measured against
+
+Two rules specific to training, both of which produce a plausible-looking run
+when broken:
+
+- **Isolate both buses, not one.** Each worker needs `ROS_DOMAIN_ID` *and*
+  `GZ_PARTITION`. gz-transport is a separate bus from DDS: with a shared
+  partition, one worker's `/world/arena/control` call can be served by another
+  worker's Gazebo, so a step advances someone else's world and the caller
+  blocks on a stamp nobody will publish. It mostly works, then cross-wires
+  under a discovery race. `sim_launcher.worker_environment` is the only place
+  that should set either.
+- **Evaluate on `eval_set.episodes()`, never on fresh random episodes.**
+  Two runs scored on two different draws differ by the sampler as much as by
+  the policy, and that difference is the same size as the effect being
+  reported. The set is fixed, generated from a seed training never uses, and
+  the callback's 20 episodes are the first 20 of the reported 100.
+
+One contract-level fact that surfaced while building the eval set: 500 steps at
+0.4 m/s covers 10.0 m, but the arena diagonal is 14.15 m — **the sampler can
+emit episodes that no policy can finish**. Harmless in training (a hard
+negative), so nothing was changed in `CONTRACTS.md`; on an evaluation set it
+would cap the achievable success rate below 100% at an unknown and moving
+value, so eval goals are capped at `eval_set.MAX_EVAL_DISTANCE`.
+
 ## Working rules
 
 - **Every task ends with a command whose text output verifies it.** An agent
@@ -218,12 +252,24 @@ Two gotchas that cost real time if you meet them cold:
 
 ## Current phase
 
-**Phase 2 complete; Phase 3 (training) is next.** Update this line when a phase
-closes; it is how the next session knows where to start.
+**Phase 2 complete. Phase 3 is built but not yet run.** Update this line when a
+phase closes; it is how the next session knows where to start.
 
-Two deviations from `CONTRACTS.md` are outstanding and want a human ruling —
-both are documented at the point of deviation, neither is a silent divergence:
+Every Phase 3 module exists and is tested, and the whole path has been smoke-run
+end to end in the container — a 300-step SAC run wrote checkpoints, scalars,
+`final.zip` and `vecnormalize.pkl`, and `evaluate.py` scored that policy over
+the held-out set. **No real training run has happened yet**, so there are no
+results, and the README's results table is still empty on purpose.
+
+Next session: launch `make train ALGO=sac SEED=0` yourself, outside the agent
+loop, and hand back the TensorBoard scalars or `runs/<algo>-seed<N>/eval.json`
+as text. Three seeds per algorithm before anything is reported.
+
+Three deviations from `CONTRACTS.md` are outstanding and want a human ruling —
+each is documented at the point of deviation, none is a silent divergence:
 
 1. Reset does not restore the world (`contract.BRAKE_ITERATIONS`).
 2. Episodes are therefore reproducible but not bit-identical
    (`test_same_seed_and_actions_give_identical_observations`).
+3. `reset(options={"start": ..., "goal": ...})` is an addition to the specified
+   options, needed for a held-out evaluation set (`env.reset`).
