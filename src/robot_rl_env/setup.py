@@ -15,6 +15,10 @@ setup(
         (f"share/{package_name}/worlds", glob("worlds/*.sdf")),
         (f"share/{package_name}/config", glob("config/*.yaml")),
         (f"share/{package_name}/models/diffbot", glob("models/diffbot/*")),
+        # The monitor page. Installed so a launched node finds it through the
+        # ament index; monitor_node falls back to the source tree when there is
+        # no install, so a colour can be changed without a colcon build.
+        (f"share/{package_name}/web", glob("web/*")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -25,6 +29,7 @@ setup(
     entry_points={
         "console_scripts": [
             "policy_node = robot_rl_env.policy_node:main",
+            "monitor_node = robot_rl_env.monitor_node:main",
         ],
     },
 )

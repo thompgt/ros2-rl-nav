@@ -79,3 +79,24 @@ services:
       bash -lc "colcon build --symlink-install
       && source install/setup.bash
       && ros2 launch robot_rl_env deploy.launch.py policy:=$$POLICY"
+
+  # Phase 6. The same deployment, watched from a browser on the host.
+  #
+  # The published port is the whole access control: the monitor's POST route
+  # sets a goal, and there is no authentication in front of it. Bound to
+  # 127.0.0.1 on the host side deliberately -- a bare "8080:8080" would put a
+  # robot's goal input on every interface of the machine.
+  monitor:
+    <<: *common
+    ports:
+      - "127.0.0.1:${MONITOR_PORT:-8080}:8080"
+    environment:
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUNBUFFERED: "1"
+      POLICY: ${POLICY:-runs/sac-seed0/policy.pt}
+    command: >
+      bash -lc "colcon build --symlink-install
+      && source install/setup.bash
+      && ros2 launch robot_rl_env monitor.launch.py policy:=$$POLICY"

@@ -61,6 +61,16 @@ def generate_launch_description():
             default_value="/goal_pose",
             description="PoseStamped goals, in the odom frame.",
         ),
+        DeclareLaunchArgument(
+            "status_topic",
+            default_value="",
+            description=(
+                "Empty, meaning the policy node publishes no per-tick status. "
+                "monitor.launch.py sets it; the gap measurement leaves it alone, "
+                "so the instrument runs the same code path being measured as it "
+                "does when nobody is watching."
+            ),
+        ),
     ]
 
     world = IncludeLaunchDescription(
@@ -81,6 +91,7 @@ def generate_launch_description():
             {
                 "policy": policy,
                 "goal_topic": LaunchConfiguration("goal_topic"),
+                "status_topic": LaunchConfiguration("status_topic"),
                 "use_sim_time": False,  # see the module docstring
             }
         ],

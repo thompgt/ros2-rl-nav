@@ -46,10 +46,23 @@ degrading over time rather than as a frame error.
 No tf2 lookup, deliberately: a transform this node cannot verify is a
 dependency on a tree that may not exist, and the failure would be silent in the
 same way.
+
+Status, and why it is off by default
+------------------------------------
+``status_topic`` publishes what the controller decided each tick, as JSON, for
+``monitor_node.py`` to draw. It defaults to **empty, meaning disabled**, and
+``deploy_eval.py`` never sets it.
+
+That is not caution about cost -- one small publish beside a ``Twist`` at the
+same rate is nothing. It is that this node is the instrument the Phase 4 gap is
+measured with, and an instrument should have the same code path during the
+measurement as it does when nobody is watching. Opt-in keeps that true by
+construction rather than by argument.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 
 import rclpy
@@ -58,6 +71,7 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallb
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
+from std_msgs.msg import String
 
 from robot_rl_env import contract
 from robot_rl_env.deploy import DeploymentController, Outcome, TickStatistics
@@ -103,6 +117,7 @@ class PolicyNode(Node):
         self.declare_parameter("goal_topic", GOAL_TOPIC)
         self.declare_parameter("control_hz", float(contract.CONTROL_HZ))
         self.declare_parameter("goal_frame", ODOM_FRAME)
+        self.declare_parameter("status_topic", "")  # empty = disabled; see the docstring
 
         # The argument wins over the parameter so ``deploy_eval`` can build this
         # node directly. That matters more than it looks: the alternative is a
@@ -129,6 +144,15 @@ class PolicyNode(Node):
         self.stats = TickStatistics()
 
         self._cmd_pub = self.create_publisher(Twist, "/cmd_vel", CMD_QOS)
+
+        status_topic = self.get_parameter("status_topic").value
+        self._status_pub = (
+            self.create_publisher(String, status_topic, 10) if status_topic else None
+        )
+        # Counts goals, not steps: the monitor uses it to tell one run from the
+        # next so it can clear the drawn trail. The step counter restarts at
+        # zero and would look identical to a policy that reset itself.
+        self._episode = 0
 
         # The timer gets a MutuallyExclusiveCallbackGroup of its own: the
         # controller carries episode state across ticks and is not thread-safe,
@@ -186,6 +210,7 @@ class PolicyNode(Node):
         """
         self.controller.set_goal(goal_xy)
         self._last_reason = None
+        self._episode += 1
         self.get_logger().info(f"goal ({goal_xy[0]:.2f}, {goal_xy[1]:.2f}) in {self._goal_frame}")
 
     # --- the control loop -----------------------------------------------------
@@ -206,12 +231,42 @@ class PolicyNode(Node):
         self._publish(command.linear, command.angular)
         self.stats.record(command.reason, age)
         self._log_transition(command)
+        self._publish_status(command, age)
 
     def _publish(self, linear: float, angular: float) -> None:
         msg = Twist()
         msg.linear.x = float(linear)
         msg.angular.z = float(angular)
         self._cmd_pub.publish(msg)
+
+    def status_payload(self, command, age: float) -> dict:
+        """What the controller decided this tick, as plain data.
+
+        Separate from the publish so it can be checked without a ROS graph.
+        ``age`` is reported as-is, including the infinity that means no sample
+        has ever arrived -- ``json`` writes that as ``Infinity``, which is not
+        valid JSON, so it is mapped to ``null`` here rather than in the reader.
+        """
+        goal = self.controller.goal
+        return {
+            "reason": command.reason,
+            "outcome": command.outcome.value,
+            "terminal": command.outcome.is_terminal,
+            "step": command.step,
+            "max_steps": contract.MAX_EPISODE_STEPS,
+            "episode": self._episode,
+            "goal": list(goal) if goal is not None else None,
+            "distance_to_goal": command.distance_to_goal,
+            "min_lidar": command.min_lidar,
+            "age": None if age == STALE_FOREVER else age,
+        }
+
+    def _publish_status(self, command, age: float) -> None:
+        if self._status_pub is None:
+            return
+        message = String()
+        message.data = json.dumps(self.status_payload(command, age))
+        self._status_pub.publish(message)
 
     def _log_transition(self, command) -> None:
         """One line per change of reason, not one per tick.

@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy gap report gif world clean
+.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy monitor gap report gif world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -16,6 +16,7 @@ help:
 	@echo "export-policy - TorchScript export: make export-policy MODEL=<path to .zip>"
 	@echo "board    - TensorBoard over runs/ on port 6006"
 	@echo "deploy   - Phase 4: run the policy against a free-running world"
+	@echo "monitor  - Phase 4 deployment plus a live browser view on :8080"
 	@echo "gap      - Phase 4 measurement: free-running vs step-synchronized"
 	@echo "report   - aggregate runs/*/eval.json over seeds into the README tables"
 	@echo "gif      - render one held-out episode as a top-down GIF"
@@ -107,6 +108,20 @@ board:
 POLICY ?= runs/$(ALGO)-seed$(SEED)/policy.pt
 deploy:
 	POLICY=$(POLICY) $(COMPOSE) run --rm deploy
+
+# make monitor POLICY=runs/sac-seed0/policy.pt
+#
+# The same unpaused deployment as `make deploy`, plus a browser view of it on
+# http://localhost:8080 -- the arena, the 20 pooled LiDAR sectors the policy
+# receives, the commanded velocities, and the observation age against the
+# fixed 50 ms training saw. Click the arena to send a goal.
+#
+# Not the target to measure with: `make gap` uses deploy.launch.py, without a
+# second node and a browser sharing a container that only sustains RTF 0.3-0.5.
+MONITOR_PORT ?= 8080
+monitor:
+	POLICY=$(POLICY) MONITOR_PORT=$(MONITOR_PORT) $(COMPOSE) run --rm \
+	  --service-ports monitor
 
 # The Phase 4 measurement. Scores the exported policy on the same held-out
 # episodes as `make evaluate`, but free-running, and prints the two side by
