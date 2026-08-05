@@ -72,6 +72,18 @@ deliberately against.
   closes the window — `/clock` returns to zero well before the entity manager
   will accept a pose. `reset()` brakes the robot to a stop and teleports
   instead. See `contract.BRAKE_ITERATIONS`.
+- **Never drive the deployment node's control timer from `/clock`.** It is
+  tempting: `use_sim_time:=true` would hold the control period at exactly the
+  50 ms the policy trained on, however slowly the simulator ran. It would also
+  quietly subtract part of the effect Phase 4 exists to measure, because a real
+  robot's control loop does not get to slow down when the world does. Same for
+  the watchdog, which has to fire when the clock stops and therefore cannot be
+  measured against that clock. The real-time factor is reported beside the gap
+  instead — see `deploy_eval.effective_control_hz`.
+- **Never let the deployment node compute a reward.** It has no `d_prev`
+  bookkeeping and adding one would be a second implementation of the reward in
+  `CONTRACTS.md`, living outside `env.step`. `summarize_rollouts` omits
+  `mean_reward` when the records lack it rather than reporting a nan.
 - **Never treat "a message arrived" as "the world has advanced".** The barrier
   is the *stamp*. Advancing many iterations at once queues a burst of samples,
   and the first one delivered afterwards is the **oldest** of that burst — so a
@@ -109,9 +121,10 @@ src/robot_rl_env/
   robot_rl_env/
     contract.py           every contract number, transcribed once
     arena.py              PURE — arena geometry + free-space rejection sampling
+    observation.py        PURE, SHARED obs assembly (train + deploy)
+    action.py             PURE, SHARED action -> (v, omega) mapping
     sim_control.py        Phase 2a — world control / set_pose service client
-    observation.py        Phase 2b — PURE, SHARED obs assembly (train + deploy)
-    observation_node.py   Phase 2b — ROS subscriber layer around it
+    observation_node.py   Phase 2b — ROS subscriber layer around observation.py
     env.py                Phase 2c — RobotNavEnv(gymnasium.Env)
     eval_set.py           Phase 3 — PURE, the held-out evaluation episodes
     hyperparams.py        Phase 3 — PURE, SAC/PPO config and run constants
@@ -120,19 +133,22 @@ src/robot_rl_env/
     callbacks.py          Phase 3 — curriculum, success/collision/timeout logs
     train.py              Phase 3 — entry point
     evaluate.py           Phase 3 — deterministic scoring, prints + JSON
-    policy_node.py        Phase 4 — ROS 2 inference node (scaffolding only)
+    deploy.py             Phase 4 — PURE, the deployment decision logic
+    export_policy.py      Phase 4 — SB3 zip -> TorchScript, and the loader
+    policy_node.py        Phase 4 — ROS 2 inference node
+    deploy_eval.py        Phase 4 — the sim-to-deployment gap measurement
   worlds/arena.sdf        10x10 m arena, 7 obstacles, 1 ms physics step
   models/diffbot/         chassis, diff drive, 360-beam LiDAR
   config/bridge.yaml      ros_gz_bridge topic + service mapping
-  launch/world.launch.py  headless:=true default
+  launch/world.launch.py  headless:=true, paused:=true — training defaults
+  launch/deploy.launch.py Phase 4 — the same world with paused:=false
   test/                   test_env.py is @pytest.mark.sim; the rest are pure
 scripts/verify_phase1.sh  text-output verification of the bridge
 scripts/verify_phase2.sh  launches the world, then runs phase2_checks.py
 scripts/phase2_checks.py  Phase 2 exit criteria as PASS/FAIL lines
+scripts/verify_phase4.sh  train tiny -> export -> free-running eval, end to end
 ```
 
-`policy_node.py` is scaffolding: its `main` raises, and its docstring is the
-contract for whoever implements Phase 4.
 
 ## Pure core, ROS shell
 
@@ -171,8 +187,11 @@ make verify2 EPISODES=25   # shorter run; the count cannot be appended to the
 make world          # launch the arena headless and paused, for manual poking
 make train ALGO=sac SEED=0 ENVS=4    # Phase 3 training � hours; launch it yourself
 make evaluate MODEL=runs/sac-seed0/best/best_model.zip
+make export-policy MODEL=runs/sac-seed0/best/best_model.zip  # -> <run>/policy.pt
 make board          # TensorBoard over runs/ on :6006
-make deploy         # Phase 4
+make verify4        # Phase 4 smoke: train tiny -> export -> free-running eval
+make deploy POLICY=runs/sac-seed0/policy.pt   # unpaused world + inference node
+make gap            # Phase 4 measurement: free-running vs step-synchronized
 make clean          # rm -rf build install log
 ```
 
@@ -240,6 +259,39 @@ negative), so nothing was changed in `CONTRACTS.md`; on an evaluation set it
 would cap the achievable success rate below 100% at an unknown and moving
 value, so eval goals are capped at `eval_set.MAX_EVAL_DISTANCE`.
 
+## Phase 4: what makes the gap a measurement rather than an anecdote
+
+The point of Phase 4 is a *number*, and a number is only worth reporting if the
+two things being subtracted differ in one respect. So:
+
+- **Everything except the timing is shared code.** `deploy.DeploymentController`
+  mirrors `env.step` — same goal tolerance, same collision threshold, same
+  500-step limit, same step-count bookkeeping — and both call the same
+  `assemble_observation` and the same `scale_action`. If the deployment loop
+  also changed a termination rule, the measured difference would be part
+  architecture and part bookkeeping with no way to separate them.
+- **`deploy_eval` drives a real `PolicyNode`**, rather than running the same
+  controller through its own loop. A harness with its own loop measures the
+  harness.
+- **A watchdog tick does not spend the step budget.** Observation index 25 is
+  the fraction of the 500 steps used, learned against a counter that advanced
+  once per action *issued*. Counting stopped ticks would run the deployment
+  clock fast exactly when the system was under load — a gap manufactured by the
+  instrument.
+- **The safety gate is checked before the episode logic, not after.** 0.15 m is
+  inside 0.18 m, so a safety trip is always also a collision; terminating first
+  makes the gate unreachable code. A safety layer has to stop the robot when the
+  surrounding logic is wrong, so it cannot sit downstream of it. The bookkeeping
+  still records the collision — only the reported reason changes.
+
+Two things about this container specifically, both measured rather than
+assumed: observations reach the node ~121 ms stale on average (p95 183 ms,
+max 243 ms) against training's fixed 50 ms, and 2% of ticks exceed the 200 ms
+watchdog outright. And it sustains a real-time factor of only 0.3–0.5, which
+means a 20 Hz wall-clock control loop is 40–65 Hz in *sim* time — a confound in
+the headline gap that `deploy_eval` names in its output. The gap number itself
+wants a host that holds RTF near 1.
+
 ## Working rules
 
 - **Every task ends with a command whose text output verifies it.** An agent
@@ -252,20 +304,23 @@ value, so eval goals are capped at `eval_set.MAX_EVAL_DISTANCE`.
 
 ## Current phase
 
-**Phase 2 complete. Phase 3 is built but not yet run.** Update this line when a
-phase closes; it is how the next session knows where to start.
+**Phases 0–2 and 4 complete. Phase 3 is built but not yet run.** Update this
+line when a phase closes; it is how the next session knows where to start.
 
-Every Phase 3 module exists and is tested, and the whole path has been smoke-run
-end to end in the container — a 300-step SAC run wrote checkpoints, scalars,
-`final.zip` and `vecnormalize.pkl`, and `evaluate.py` scored that policy over
-the held-out set. **No real training run has happened yet**, so there are no
-results, and the README's results table is still empty on purpose.
+Every Phase 3 and Phase 4 module exists and is tested, and both paths have been
+smoke-run end to end in the container. `scripts/verify_phase4.sh` trains a
+300-step throwaway policy, exports it to TorchScript, loads it in the real
+deployment node, and scores it free-running — export agreement, `.pt` loading,
+the world→odom goal bridge, episode termination and the gap report all pass.
+**No real training run has happened yet**, so there are no results, and both of
+the README's tables are still empty on purpose.
 
 Next session: launch `make train ALGO=sac SEED=0` yourself, outside the agent
 loop, and hand back the TensorBoard scalars or `runs/<algo>-seed<N>/eval.json`
-as text. Three seeds per algorithm before anything is reported.
+as text. Three seeds per algorithm before anything is reported. Then
+`make export-policy` and `make gap` fill the sim-to-deployment table.
 
-Three deviations from `CONTRACTS.md` are outstanding and want a human ruling —
+Four deviations from `CONTRACTS.md` are outstanding and want a human ruling —
 each is documented at the point of deviation, none is a silent divergence:
 
 1. Reset does not restore the world (`contract.BRAKE_ITERATIONS`).
@@ -273,3 +328,10 @@ each is documented at the point of deviation, none is a silent divergence:
    (`test_same_seed_and_actions_give_identical_observations`).
 3. `reset(options={"start": ..., "goal": ...})` is an addition to the specified
    options, needed for a held-out evaluation set (`env.reset`).
+4. `CONTRACTS.md`'s shared-code requirement names only
+   `assemble_observation`. Phase 4 extended the same treatment to the action
+   mapping (`action.scale_action`), on the grounds that the argument for one is
+   verbatim the argument for the other. The document has not been amended —
+   it is authoritative and hand-reviewed, and this is a widening of a rule
+   rather than a departure from one, but it is still a change to what the
+   document says and wants signing off.

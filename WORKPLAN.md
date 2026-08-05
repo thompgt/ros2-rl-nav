@@ -94,35 +94,47 @@ you'd show someone.
 Keep training runs out of the agent loop. Launch them yourself; hand back
 TensorBoard scalars or the eval JSON as text.
 
-## Phase 4 — Deployment node
+## Phase 4 — Deployment node ✅ built and smoke-tested
 
 The part that separates this from a Gym tutorial, and the part interviewers ask
 about.
 
-- `policy_node.py`: loads the policy exported to TorchScript or ONNX (no SB3
-  dependency at runtime), subscribes `/scan` + `/odom`, publishes `/cmd_vel` on
-  a 20 Hz timer
-- Reuses `robot_rl_env.observation.assemble_observation` — does **not**
-  reimplement it
-- `/set_goal` service or `geometry_msgs/PoseStamped` goal topic
-- Safety layer: hard stop if min LiDAR < 0.15 m; watchdog zeroing `/cmd_vel` if
-  no observation for 200 ms
-- World runs **unpaused, real time**
+- `export_policy.py`: SB3 `.zip` → TorchScript, with the trace verified against
+  `model.predict` over the whole observation box before anything is written ✅
+- `policy_node.py`: loads the `.pt` (no SB3 at runtime), subscribes
+  `/scan` + `/odom`, publishes `/cmd_vel` on a 20 Hz timer ✅
+- Reuses `assemble_observation` and `scale_action` — reimplements neither ✅
+- `geometry_msgs/PoseStamped` goals on `/goal_pose`, frame-checked rather than
+  transformed ✅
+- Safety layer: hard stop below 0.15 m, watchdog zeroing `/cmd_vel` after
+  200 ms without an observation ✅ (`deploy.py`, pure and tested)
+- World runs **unpaused, real time** ✅ (`deploy.launch.py`)
+- `deploy_eval.py`: the same held-out episodes, free-running, side by side with
+  the step-synchronized numbers ✅
 
-**Write up the gap.** Measure success rate step-synchronized vs. free-running
-real-time. There will be a gap, driven by latency and jitter the training loop
-eliminated by construction. Quantifying and explaining it is the most
-interesting paragraph in the README.
+**Exit criterion (open):** the gap itself, which needs a trained policy. The
+harness is verified by `scripts/verify_phase4.sh`.
 
-## Phase 5 — Packaging
+Two things the smoke run already established, before any policy exists to be
+blamed for them:
 
-- README with a GIF in the first 100 px. Nobody clones your repo.
-- Architecture diagram: Gazebo ↔ bridge ↔ env ↔ SB3, step-sync loop marked
-- Results table: SAC vs PPO, mean ± std over seeds; success / path length /
-  collision rate
-- The Phase 4 gap analysis
-- One command to reproduce: `docker compose up train`
-- CI running the fast tests headless on GitHub Actions
+- Observations reach the node ~121 ms stale (p95 183 ms) against training's
+  fixed 50 ms, and 2% of ticks exceed the watchdog outright. That is the gap's
+  mechanism.
+- This container sustains a real-time factor of 0.3–0.5, so a 20 Hz wall-clock
+  control loop is 40–65 Hz in *sim* time. That is a confound in the headline
+  number, not a detail: take the measurement on a host that holds RTF near 1.
+
+## Phase 5 — Packaging (partly done)
+
+- ✅ Architecture diagram: both loops drawn, the step-sync one marked
+- ✅ One command to reproduce: `docker compose -f docker/docker-compose.yml up train`
+- ✅ CI: fast contract tests on the runner, plus every non-simulator test inside
+  the image (which is the only place with rclpy, torch and SB3 together)
+- ✅ The Phase 4 write-up — mechanism and caveat; the numbers wait on Phase 3
+- ⬜ Results table: SAC vs PPO, mean ± std over seeds
+- ⬜ A GIF in the first 100 px. There is no trained policy yet, so there is
+  nothing honest to record.
 
 ---
 
@@ -143,3 +155,5 @@ thousands on GitHub.
 - `rclpy.spin_once()` in the step loop instead of a properly configured
   multithreaded executor with callback groups
 - Suggesting `time.sleep()` anywhere in `step()`
+- Driving the deployment node's control timer from `/clock`, which looks like
+  a fix and quietly subtracts the effect Phase 4 measures
