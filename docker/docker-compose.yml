@@ -80,6 +80,14 @@ services:
       && source install/setup.bash
       && ros2 launch robot_rl_env deploy.launch.py policy:=$$POLICY"
 
+  # Phase 6 smoke. No port published: it drives the monitor from inside the
+  # container, which is also the point -- the checks are text, not a browser.
+  verify6:
+    <<: *common
+    command: >
+      bash -lc "colcon build --symlink-install
+      && scripts/verify_phase6.sh"
+
   # Phase 6. The same deployment, watched from a browser on the host.
   #
   # The published port is the whole access control: the monitor's POST route

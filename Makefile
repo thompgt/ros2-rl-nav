@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy monitor gap report gif world clean
+.PHONY: help build shell test verify verify2 lint verify4 verify6 train evaluate export-policy board deploy monitor gap report gif world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -10,6 +10,7 @@ help:
 	@echo "verify2  - Phase 2 exit criteria: 100 random episodes, throughput, memory"
 	@echo "lint     - ruff check"
 	@echo "verify4  - Phase 4 smoke: train tiny, export, free-running eval"
+	@echo "verify6  - Phase 6 smoke: the monitor serves, streams and steers"
 	@echo "world    - launch the arena headless (paused), for manual poking"
 	@echo "train    - Phase 3 training: make train ALGO=sac SEED=0 ENVS=4"
 	@echo "evaluate - Phase 3 evaluation: make evaluate MODEL=<path to .zip>"
@@ -108,6 +109,12 @@ board:
 POLICY ?= runs/$(ALGO)-seed$(SEED)/policy.pt
 deploy:
 	POLICY=$(POLICY) $(COMPOSE) run --rm deploy
+
+# Phase 6 smoke. Needs a policy: run verify4 first, which trains a throwaway
+# one. Talks to the monitor the way a browser does and asserts on what came
+# back, because every failure here is otherwise silent.
+verify6:
+	$(COMPOSE) run --rm verify6
 
 # make monitor POLICY=runs/sac-seed0/policy.pt
 #
