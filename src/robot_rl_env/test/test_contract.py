@@ -109,6 +109,26 @@ def test_lidar_beam_angles_match_contract():
     )
 
 
+def test_robot_spawn_pose_matches_the_world_include():
+    """The monitor seeds its odom -> world transform with this pose.
+
+    Odometry starts at zero wherever the robot happens to be spawned, so a
+    stale copy here does not fail: it draws the whole run offset by the
+    difference, obstacles included, and looks like a policy that navigates
+    consistently into walls.
+    """
+    root = ET.parse(WORLD_SDF).getroot()
+    include = next(
+        e for e in root.iter("include")
+        if contract.ROBOT_NAME in "".join(u.text or "" for u in e.iter("uri"))
+    )
+    x, y, z, _, _, yaw = (float(v) for v in next(include.iter("pose")).text.split())
+
+    assert (x, y) == pytest.approx(contract.ROBOT_SPAWN_POSE[:2])
+    assert yaw == pytest.approx(contract.ROBOT_SPAWN_POSE[2])
+    assert z == pytest.approx(contract.ROBOT_SPAWN_Z)
+
+
 def test_robot_name_matches_contract():
     root = ET.parse(ROBOT_SDF).getroot()
     model = root.find("model")

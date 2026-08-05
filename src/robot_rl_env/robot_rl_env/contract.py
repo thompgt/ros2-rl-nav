@@ -161,6 +161,15 @@ ROBOT_SPAWN_Z = 0.06
 """Metres. Teleport height, matching the ``<include>`` pose in worlds/arena.sdf.
 Spawning at z=0 drops the wheels through the ground plane."""
 
+ROBOT_SPAWN_POSE = (-4.0, -4.0, 0.785)
+"""World-frame ``(x, y, yaw)`` the robot is placed at by the ``<include>`` pose
+in worlds/arena.sdf, which ``test_contract.py`` checks.
+
+Training never needs this -- ``reset()`` samples a start and teleports there.
+It matters for the deployment monitor, which has only ``odom`` and therefore
+has to seed the odom -> world transform with the pose odometry started from.
+"""
+
 # --- Simulation plumbing -----------------------------------------------------
 WORLD_NAME = "arena"
 ROBOT_NAME = "diffbot"
