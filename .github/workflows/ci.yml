@@ -35,12 +35,22 @@ jobs:
         working-directory: src/robot_rl_env
         run: python -m pytest test -v
 
-  # Slow path: build the ROS 2 Jazzy + Gazebo Harmonic image. Does not run the
-  # simulator (GitHub runners have no GPU for ogre2), only proves the image
-  # still builds.
+  # Slow path: build the ROS 2 Jazzy + Gazebo Harmonic image, then run every
+  # test that does not need a running simulator inside it. GitHub runners have
+  # no GPU for ogre2, so the `sim` marker stays excluded — but the image is the
+  # only place with rclpy, torch and stable-baselines3, and without this step
+  # the Phase 4 export tests skip in CI and run nowhere.
   image:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Build image
         run: docker build -f docker/Dockerfile -t ros2-rl-nav:ci .
+
+      - name: Tests that need the full stack but not a simulator
+        run: |
+          docker run --rm -v "$PWD":/ws -w /ws ros2-rl-nav:ci bash -lc \
+            "colcon build --symlink-install --event-handlers console_direct+ \
+             && source install/setup.bash \
+             && pytest -v -m 'not sim' src/robot_rl_env/test"
