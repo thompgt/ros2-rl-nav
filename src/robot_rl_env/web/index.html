@@ -1,0 +1,83 @@
+<!doctype html>
+<!--
+  The deployment monitor. One page, no build step, no dependencies -- not
+  minimalism for its own sake: a bundler in this repo would mean a Node
+  toolchain in a 13 GB ROS image, and a CDN would mean the debug view stops
+  working on the machine most likely to need it, the one with no internet.
+
+  There is no geometry in here. Every number this page draws arrives in world
+  metres from robot_rl_env/monitor.py, which is the same code path -- the same
+  min-pooling, the same beam angles -- that the policy's observation comes
+  from. See that module's docstring for why that matters.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ros2-rl-nav — deployment monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>ros2-rl-nav <span class="sub">deployment monitor</span></h1>
+    <div id="link" class="pill">connecting…</div>
+  </header>
+
+  <main>
+    <section class="stage">
+      <canvas id="arena" width="720" height="720"
+              aria-label="Top-down view of the arena, the robot, and its LiDAR"></canvas>
+      <p class="hint">Click anywhere free to send a goal. It is published on
+        <code>/goal_pose</code> in <code>odom</code>.</p>
+      <p id="error" class="error" hidden></p>
+    </section>
+
+    <section class="panel">
+      <div class="stat"><span class="label">linear</span>
+        <span class="value" id="linear">—</span><span class="unit">m/s</span></div>
+      <div class="meter"><i id="linear-bar"></i></div>
+
+      <div class="stat"><span class="label">angular</span>
+        <span class="value" id="angular">—</span><span class="unit">rad/s</span></div>
+      <div class="meter signed"><i id="angular-bar"></i></div>
+
+      <div class="stat"><span class="label">goal</span>
+        <span class="value" id="distance">—</span><span class="unit">m</span></div>
+      <div class="stat"><span class="label">clearance</span>
+        <span class="value" id="clearance">—</span><span class="unit">m</span></div>
+      <div class="stat"><span class="label">step</span>
+        <span class="value" id="step">—</span><span class="unit" id="max-steps"></span></div>
+
+      <hr>
+
+      <!--
+        Observation age is the headline of this panel, not a footnote. Training
+        saw every observation exactly 50 ms old, always, because the world was
+        stepped and the env blocked on the stamp. Here it is whatever the
+        bridge and the CPU allow, and the difference is what Phase 4 measures.
+      -->
+      <div class="stat"><span class="label">obs age</span>
+        <span class="value" id="age">—</span><span class="unit">ms</span></div>
+      <div class="meter"><i id="age-bar"></i></div>
+      <p class="note">training: fixed <b>50 ms</b> · watchdog at
+        <b id="watchdog">—</b> ms</p>
+
+      <div class="stat"><span class="label">reason</span>
+        <span class="value wide" id="reason">—</span></div>
+      <div class="stat"><span class="label">outcome</span>
+        <span class="value wide" id="outcome">—</span></div>
+
+      <hr>
+
+      <p class="note legend">
+        <b class="swatch beam"></b> the 20 min-pooled LiDAR sectors the policy
+        receives — not the 360 raw beams<br>
+        <b class="swatch drift"></b> pose is dead-reckoned from odometry;
+        drift off the obstacles is real odometry error, uncorrected
+      </p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
