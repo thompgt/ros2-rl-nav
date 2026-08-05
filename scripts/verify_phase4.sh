@@ -42,11 +42,22 @@ python3 -m robot_rl_env.export_policy --model "${RUN_DIR}/final.zip" --algo sac
 test -f "${RUN_DIR}/policy.pt" || { echo "FAIL: no policy.pt written"; exit 1; }
 
 echo
-echo "--- 3/3 free-running evaluation ----------------------------------------"
+echo "--- 3/4 free-running evaluation ----------------------------------------"
 python3 -m robot_rl_env.deploy_eval \
   --policy "${RUN_DIR}/policy.pt" \
   --episodes "${EPISODES}" \
   --json "${RUN_DIR}/gap.json"
+
+echo
+echo "--- 4/4 render one episode ---------------------------------------------"
+# The drawing itself is unit-tested; what this covers is the wiring -- that the
+# trace comes back populated from a real env, that the odom->world transform
+# has the fields it expects, and that matplotlib is actually in the image.
+python3 -m robot_rl_env.record \
+  --model "${RUN_DIR}/final.zip" --algo sac \
+  --episode 0 --out "${RUN_DIR}/nav.gif"
+
+test -s "${RUN_DIR}/nav.gif" || { echo "FAIL: no GIF written"; exit 1; }
 
 echo
 echo "=== PASS: the deployment path runs end to end ==="

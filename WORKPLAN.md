@@ -136,8 +136,11 @@ blamed for them:
   `runs/<algo>-seed<N>/{eval,gap}.json` and splices both tables into the README
   between markers, so the numbers are generated rather than transcribed.
   Waiting only on runs to aggregate.
-- ⬜ A GIF in the first 100 px. There is no trained policy yet, so there is
-  nothing honest to record.
+- ⬜ A GIF in the first 100 px. The recorder is built and tested (`record.py`,
+  `make gif`) and draws the *observation* — the 20 pooled LiDAR sectors, not a
+  Gazebo screenshot, which would need a GPU for ogre2 and would hide what the
+  policy actually sees. There is no trained policy yet, so there is nothing
+  honest to record.
 
 ---
 
