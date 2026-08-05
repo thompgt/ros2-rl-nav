@@ -137,6 +137,7 @@ src/robot_rl_env/
     export_policy.py      Phase 4 — SB3 zip -> TorchScript, and the loader
     policy_node.py        Phase 4 — ROS 2 inference node
     deploy_eval.py        Phase 4 — the sim-to-deployment gap measurement
+    report.py             Phase 5 — PURE, seed aggregation -> the README tables
   worlds/arena.sdf        10x10 m arena, 7 obstacles, 1 ms physics step
   models/diffbot/         chassis, diff drive, 360-beam LiDAR
   config/bridge.yaml      ros_gz_bridge topic + service mapping

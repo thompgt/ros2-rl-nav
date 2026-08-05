@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy gap world clean
+.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy gap report world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -17,6 +17,7 @@ help:
 	@echo "board    - TensorBoard over runs/ on port 6006"
 	@echo "deploy   - Phase 4: run the policy against a free-running world"
 	@echo "gap      - Phase 4 measurement: free-running vs step-synchronized"
+	@echo "report   - aggregate runs/*/eval.json over seeds into the README tables"
 	@echo "clean    - remove colcon build artifacts"
 
 build:
@@ -115,6 +116,14 @@ gap:
 	  && python3 -m robot_rl_env.deploy_eval --policy $(POLICY) \
 	     --baseline runs/$(ALGO)-seed$(SEED)/eval.json \
 	     --json runs/$(ALGO)-seed$(SEED)/gap.json"
+
+# Aggregate every runs/<algo>-seed<N>/{eval,gap}.json into the README's two
+# tables, mean +/- std over seeds, and splice them in between the markers.
+# Pure arithmetic -- no simulator, no torch -- so it runs on the host too:
+#
+#   python3 -m robot_rl_env.report            # print without writing
+report:
+	$(COMPOSE) run --rm test bash -lc "python3 -m robot_rl_env.report --write README.md"
 
 clean:
 	rm -rf build install log

@@ -132,7 +132,10 @@ blamed for them:
 - ✅ CI: fast contract tests on the runner, plus every non-simulator test inside
   the image (which is the only place with rclpy, torch and SB3 together)
 - ✅ The Phase 4 write-up — mechanism and caveat; the numbers wait on Phase 3
-- ⬜ Results table: SAC vs PPO, mean ± std over seeds
+- ✅ Results table: SAC vs PPO, mean ± std over seeds — `report.py` aggregates
+  `runs/<algo>-seed<N>/{eval,gap}.json` and splices both tables into the README
+  between markers, so the numbers are generated rather than transcribed.
+  Waiting only on runs to aggregate.
 - ⬜ A GIF in the first 100 px. There is no trained policy yet, so there is
   nothing honest to record.
 
