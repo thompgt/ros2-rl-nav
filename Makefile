@@ -83,8 +83,16 @@ board:
 	$(COMPOSE) run --rm --service-ports train bash -lc \
 	  "tensorboard --logdir runs --host 0.0.0.0 --port 6006"
 
+# make deploy POLICY=runs/sac-seed0/policy.pt
+#
+# Launches the arena unpaused and the inference node against it, then waits for
+# a goal. From another shell (`make shell`):
+#
+#   ros2 topic pub --once /goal_pose geometry_msgs/msg/PoseStamped \
+#     '{header: {frame_id: odom}, pose: {position: {x: 2.0, y: 1.0}}}'
+POLICY ?= runs/$(ALGO)-seed$(SEED)/policy.pt
 deploy:
-	$(COMPOSE) run --rm deploy
+	POLICY=$(POLICY) $(COMPOSE) run --rm deploy
 
 clean:
 	rm -rf build install log

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import math
 import threading
+import time
 from dataclasses import dataclass
 
 import numpy as np
@@ -91,6 +92,15 @@ class ObservationAssembler(Node):
         self._odom_pose: tuple[float, float, float] | None = None
         self._clock_ns: int = 0
 
+        # Wall-clock arrival times, for Phase 4's watchdog. Deliberately
+        # *monotonic* and deliberately not the message stamp: a free-running
+        # deployment has no barrier to block on, and the condition the watchdog
+        # exists to catch -- a bridge that has stopped publishing -- is one in
+        # which the sim clock stops advancing too. A staleness test written
+        # against a stopped clock reports zero age forever.
+        self._scan_received = 0.0
+        self._odom_received = 0.0
+
         self.create_subscription(
             LaserScan, "/scan", self._on_scan, SENSOR_QOS, callback_group=self._group
         )
@@ -108,9 +118,11 @@ class ObservationAssembler(Node):
         # loop's critical path, and so the lock is held only for the assignment.
         pooled = pool_ranges(msg.ranges)
         stamp = _stamp_ns(msg.header)
+        received = time.monotonic()
         with self._cv:
             self._scan_pooled = pooled
             self._scan_stamp_ns = stamp
+            self._scan_received = received
             self._cv.notify_all()
 
     def _on_odom(self, msg: Odometry) -> None:
@@ -118,9 +130,11 @@ class ObservationAssembler(Node):
         q = msg.pose.pose.orientation
         pose = (p.x, p.y, yaw_from_quaternion(q.x, q.y, q.z, q.w))
         stamp = _stamp_ns(msg.header)
+        received = time.monotonic()
         with self._cv:
             self._odom_pose = pose
             self._odom_stamp_ns = stamp
+            self._odom_received = received
             self._cv.notify_all()
 
     def _on_clock(self, msg: Clock) -> None:
@@ -142,6 +156,38 @@ class ObservationAssembler(Node):
         with self._cv:
             if not self._cv.wait_for(ready, timeout=timeout):
                 raise ObservationTimeout(self._diagnose(timeout))
+
+    def latest_sample(self) -> tuple[Sample, float] | None:
+        """The freshest snapshot and its age in wall-clock seconds, or ``None``.
+
+        Phase 4's accessor, and the deliberate opposite of
+        :meth:`wait_for_sample`: it never blocks and never raises. That is not a
+        relaxation of the rule in the module docstring -- the rule is that a
+        *step-synchronized* env must not paper over missing data, and it must
+        not, because it controls when the world advances and can therefore
+        insist. A free-running deployment controls nothing. Its wheels are
+        already turning, there is no caller to hand an exception to, and the
+        only useful response to missing data is to stop the robot. So the
+        staleness is *returned* rather than hidden, and
+        ``deploy.DeploymentController`` is what decides it is too much.
+
+        The age is measured from arrival on a monotonic wall clock, taking the
+        older of the two topics -- a snapshot is only as fresh as its stalest
+        component, the same rule ``wait_for_sample`` applies to the stamp.
+        """
+        with self._cv:
+            if self._scan_stamp_ns is None or self._odom_stamp_ns is None:
+                return None
+            rx, ry, ryaw = self._odom_pose
+            sample = Sample(
+                pooled=self._scan_pooled,
+                x=rx,
+                y=ry,
+                yaw=ryaw,
+                stamp_ns=min(self._scan_stamp_ns, self._odom_stamp_ns),
+            )
+            age = time.monotonic() - min(self._scan_received, self._odom_received)
+        return sample, age
 
     # --- the barrier ----------------------------------------------------------
 

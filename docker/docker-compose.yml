@@ -64,10 +64,18 @@ services:
       && source install/setup.bash
       && python3 -m robot_rl_env.train --algo sac --seed 0"
 
-  # Phase 4. Not implemented yet.
+  # Phase 4. The world runs unpaused and in real time; the policy node drives
+  # it from an exported .pt. POLICY is set by `make deploy`; the default here
+  # is what `docker compose up deploy` reproduces once a run has been exported.
   deploy:
     <<: *common
+    environment:
+      ROS_DOMAIN_ID: "42"
+      RMW_IMPLEMENTATION: rmw_cyclonedds_cpp
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUNBUFFERED: "1"
+      POLICY: ${POLICY:-runs/sac-seed0/policy.pt}
     command: >
       bash -lc "colcon build --symlink-install
       && source install/setup.bash
-      && ros2 run robot_rl_env policy_node"
+      && ros2 launch robot_rl_env deploy.launch.py policy:=$$POLICY"
