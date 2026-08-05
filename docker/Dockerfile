@@ -42,6 +42,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 #
 # CPU-only torch: the dev machine has no NVIDIA GPU, and an MLP over a 26-dim
 # observation is simulator-bound anyway. The CUDA wheels are ~2.5 GB of nothing.
+#
+# matplotlib is here for robot_rl_env.record and is used through the Agg
+# backend only -- the GIF is a top-down plot rather than a screen capture,
+# because capturing the Gazebo GUI would need a GPU for ogre2 and would make
+# the recording reproducible on exactly one machine.
 RUN pip install --no-cache-dir --break-system-packages \
       --index-url https://download.pytorch.org/whl/cpu \
       "torch==2.4.*" \
@@ -50,6 +55,7 @@ RUN pip install --no-cache-dir --break-system-packages \
       "stable-baselines3>=2.3,<3.0" \
       "numpy<2.0" \
       "tensorboard>=2.16" \
+      "matplotlib>=3.8" \
       "pyyaml" \
       "pytest>=8.0" \
       "pytest-timeout" \

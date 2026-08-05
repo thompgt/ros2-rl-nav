@@ -92,6 +92,23 @@ def test_lidar_beam_count_and_range_match_contract():
     assert float(max_range.text) == pytest.approx(contract.LIDAR_MAX)
 
 
+def test_lidar_beam_angles_match_contract():
+    """The angles are what turns a pooled beam back into a direction. A
+    rendering that draws beam 0 straight ahead instead of straight back is
+    wrong in a way that looks plausible, so the SDF is the arbiter."""
+    root = ET.parse(ROBOT_SDF).getroot()
+    horizontal = next(root.iter("horizontal"))
+    min_angle = float(next(horizontal.iter("min_angle")).text)
+    max_angle = float(next(horizontal.iter("max_angle")).text)
+
+    assert min_angle == pytest.approx(contract.LIDAR_MIN_ANGLE, abs=1e-5)
+    # One increment short of a full turn, so the last beam is not the first.
+    span = max_angle - min_angle
+    assert span == pytest.approx(
+        (contract.N_RAW_BEAMS - 1) * contract.LIDAR_ANGLE_INCREMENT, abs=1e-5
+    )
+
+
 def test_robot_name_matches_contract():
     root = ET.parse(ROBOT_SDF).getroot()
     model = root.find("model")

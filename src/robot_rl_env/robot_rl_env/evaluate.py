@@ -120,7 +120,7 @@ def summarize_rollouts(results: list[dict]) -> dict:
     return metrics
 
 
-def run_episode(model, env, episode, deterministic: bool = True) -> dict:
+def run_episode(model, env, episode, deterministic: bool = True, trace: list | None = None) -> dict:
     """Play one fixed episode to termination and record what happened.
 
     Path length is integrated from ``info["robot_pose"]``, which is the odom
@@ -131,12 +131,20 @@ def run_episode(model, env, episode, deterministic: bool = True) -> dict:
     """
     obs, info = env.reset(options=episode.as_reset_options())
     previous = info["robot_pose"][:2]
+    # ``trace`` is how record.py gets the frames for a GIF. It is an optional
+    # out-parameter rather than a second rollout loop in that module, because
+    # a GIF rendered from a loop that differs from this one would show an
+    # episode the results table never scored.
+    if trace is not None:
+        trace.append({"obs": obs, "info": dict(info)})
 
     path_length, total_reward, steps = 0.0, 0.0, 0
     terminated = truncated = False
     while not (terminated or truncated):
         action, _ = model.predict(obs, deterministic=deterministic)
         obs, reward, terminated, truncated, info = env.step(action)
+        if trace is not None:
+            trace.append({"obs": obs, "info": dict(info)})
         current = info["robot_pose"][:2]
         path_length += math.dist(previous, current)
         previous = current

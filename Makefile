@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy gap report world clean
+.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy gap report gif world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -18,6 +18,7 @@ help:
 	@echo "deploy   - Phase 4: run the policy against a free-running world"
 	@echo "gap      - Phase 4 measurement: free-running vs step-synchronized"
 	@echo "report   - aggregate runs/*/eval.json over seeds into the README tables"
+	@echo "gif      - render one held-out episode as a top-down GIF"
 	@echo "clean    - remove colcon build artifacts"
 
 build:
@@ -116,6 +117,19 @@ gap:
 	  && python3 -m robot_rl_env.deploy_eval --policy $(POLICY) \
 	     --baseline runs/$(ALGO)-seed$(SEED)/eval.json \
 	     --json runs/$(ALGO)-seed$(SEED)/gap.json"
+
+# make gif MODEL=runs/sac-seed0/best/best_model.zip EPISODE=0
+#
+# Renders one *scored* held-out episode as a top-down GIF: the arena, the path,
+# and the 20 pooled LiDAR sectors the policy actually sees. Needs a simulator
+# (it replays the episode), not a GPU.
+EPISODE ?= 0
+GIF ?= docs/nav.gif
+gif:
+	$(COMPOSE) run --rm train bash -lc "colcon build --symlink-install \
+	  && source install/setup.bash \
+	  && python3 -m robot_rl_env.record --model $(MODEL) \
+	     --episode $(EPISODE) --out $(GIF)"
 
 # Aggregate every runs/<algo>-seed<N>/{eval,gap}.json into the README's two
 # tables, mean +/- std over seeds, and splice them in between the markers.

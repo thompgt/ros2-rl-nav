@@ -8,6 +8,8 @@ If you change a value here, re-read ``CONTRACTS.md`` and change it there too --
 that document is authoritative and this module is its transcription.
 """
 
+import math
+
 # --- LiDAR -------------------------------------------------------------------
 N_RAW_BEAMS = 360
 """Beams published by the sensor. Must match ``<samples>`` in models/diffbot."""
@@ -20,6 +22,14 @@ BEAM_POOL = N_RAW_BEAMS // N_BEAMS  # 18
 
 LIDAR_MAX = 10.0
 """Metres. Must match ``<range><max>`` in models/diffbot."""
+
+LIDAR_MIN_ANGLE = -math.pi
+"""Radians, in the sensor frame. Must match ``<min_angle>`` in models/diffbot."""
+
+LIDAR_ANGLE_INCREMENT = 2.0 * math.pi / N_RAW_BEAMS
+"""Radians between consecutive beams: exactly one degree. ``<max_angle>`` is
+one increment short of ``+pi`` so the last beam does not duplicate the first,
+which is what makes the pooling blocks even."""
 
 LIDAR_OFFSET_X = 0.15
 """Metres forward of the robot origin. Must match the sensor ``<pose>`` in
