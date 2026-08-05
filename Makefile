@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint train evaluate export-policy board deploy gap world clean
+.PHONY: help build shell test verify verify2 lint verify4 train evaluate export-policy board deploy gap world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -9,6 +9,7 @@ help:
 	@echo "verify   - Phase 1 bridge verification, PASS/FAIL per check"
 	@echo "verify2  - Phase 2 exit criteria: 100 random episodes, throughput, memory"
 	@echo "lint     - ruff check"
+	@echo "verify4  - Phase 4 smoke: train tiny, export, free-running eval"
 	@echo "world    - launch the arena headless (paused), for manual poking"
 	@echo "train    - Phase 3 training: make train ALGO=sac SEED=0 ENVS=4"
 	@echo "evaluate - Phase 3 evaluation: make evaluate MODEL=<path to .zip>"
@@ -36,6 +37,16 @@ verify:
 EPISODES ?= 100
 verify2:
 	$(COMPOSE) run --rm verify2 bash -lc "scripts/verify_phase2.sh $(EPISODES)"
+
+# Phase 4 smoke: trains a throwaway policy, exports it, and runs the
+# free-running evaluation. Proves the deployment path, not the policy.
+# make verify4 TIMESTEPS=300 EPISODES=2
+TIMESTEPS ?= 300
+verify4:
+	$(COMPOSE) run --rm train bash -lc "colcon build --symlink-install \
+	  && scripts/verify_phase4.sh $(TIMESTEPS) $(EPISODES4)"
+
+EPISODES4 ?= 2
 
 lint:
 	$(COMPOSE) run --rm dev bash -lc "ruff check src scripts"

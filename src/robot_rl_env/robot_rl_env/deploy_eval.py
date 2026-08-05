@@ -91,9 +91,41 @@ path integral below wants a sample per control tick, matching the per-step
 integration in ``evaluate.py``."""
 
 
+RTF_TOLERANCE = 0.1
+"""How far the real-time factor may sit from 1.0 before the result is qualified.
+
+Not a pass/fail threshold -- the run is still reported -- but past this the gap
+is no longer attributable to staleness alone. See :func:`effective_control_hz`.
+"""
+
+
 def episode_deadline(max_steps: int = contract.MAX_EPISODE_STEPS, factor: float = DEADLINE_FACTOR):
     """Wall-clock seconds allowed for one episode."""
     return max_steps / contract.CONTROL_HZ * factor
+
+
+def effective_control_hz(real_time_factor: float) -> float:
+    """The control rate this run achieved *in sim time*.
+
+    The confound that has to be reported beside the gap, and the one nobody
+    looks for. The node ticks at 20 Hz on a wall clock, as a robot would. If the
+    simulator runs at a real-time factor of 0.5, then 20 wall-clock Hz is 40 Hz
+    of sim time -- the policy issues two actions per 50 ms of simulated world
+    where training issued one, and the robot travels half as far between
+    decisions as it ever did in training.
+
+    That is a difference in the *control problem*, not in observation
+    staleness, and it would land in the measured gap indistinguishably. When
+    the factor is near 1 the two coincide and the gap means what it says; when
+    it is not, the number is qualified rather than quietly reported.
+
+    Driving the timer from ``/clock`` instead would remove this confound and
+    introduce a worse one -- a control loop that slows down when the world does,
+    which no robot's does. See ``deploy.launch.py``.
+    """
+    if not real_time_factor or math.isnan(real_time_factor):
+        return float("nan")
+    return contract.CONTROL_HZ / real_time_factor
 
 
 def compare(deployment: dict, baseline: dict | None) -> list[tuple[str, float, float, float]]:
@@ -217,6 +249,10 @@ def run_episode(node, sim, episode, *, deadline: float) -> dict:
 
     outcome = node.controller.outcome
     elapsed = time.monotonic() - started
+    # Read before clearing: clear_goal() resets the step counter, and reading
+    # it afterwards reported 0 for every episode -- which looks like a policy
+    # that terminated instantly rather than one that ran its budget.
+    steps = node.controller.step
     node.controller.clear_goal()
 
     return {
@@ -226,7 +262,7 @@ def run_episode(node, sim, episode, *, deadline: float) -> dict:
         "collided": outcome is Outcome.COLLISION,
         "stalled": stalled,
         "outcome": outcome.value,
-        "steps": node.controller.step,
+        "steps": steps,
         "path_length": path_length,
         "straight_line": episode.straight_line_distance,
         "wall_seconds": elapsed,
@@ -308,6 +344,20 @@ def main(argv: list[str] | None = None) -> int:
     print("control loop, which is where the gap comes from:")
     for key, value in statistics.items():
         print(f"{key:24s} {value:.4f}" if isinstance(value, float) else f"{key:24s} {value}")
+
+    rtf = statistics["real_time_factor"]
+    if math.isfinite(rtf) and abs(rtf - 1.0) > RTF_TOLERANCE:
+        print(
+            f"\nWARNING: real-time factor {rtf:.2f}. The node ticks at "
+            f"{contract.CONTROL_HZ:.0f} Hz on a wall clock, as a robot would, so "
+            f"this run controlled the world at {effective_control_hz(rtf):.1f} Hz "
+            f"of *sim* time against the {contract.CONTROL_HZ:.0f} Hz it was "
+            f"trained at. Part of any gap below is that rate difference rather "
+            f"than observation staleness, and the two are not separable from "
+            f"these numbers. Take the measurement on a machine that sustains a "
+            f"factor near 1, or report both figures together.",
+            flush=True,
+        )
 
     stalled = sum(r["stalled"] for r in results)
     if stalled:

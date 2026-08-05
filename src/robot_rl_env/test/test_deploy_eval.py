@@ -10,7 +10,13 @@ import math
 import pytest
 
 from robot_rl_env import contract
-from robot_rl_env.deploy_eval import compare, episode_deadline, format_comparison, parse_args
+from robot_rl_env.deploy_eval import (
+    compare,
+    effective_control_hz,
+    episode_deadline,
+    format_comparison,
+    parse_args,
+)
 
 
 def test_the_comparison_is_deployment_minus_step_synchronized():
@@ -71,6 +77,23 @@ def test_the_episode_deadline_is_a_multiple_of_the_nominal_duration():
     assert nominal == pytest.approx(25.0)
     assert episode_deadline(factor=1.0) == pytest.approx(nominal)
     assert episode_deadline(factor=4.0) == pytest.approx(100.0)
+
+
+def test_a_slow_simulator_raises_the_control_rate_in_sim_time():
+    """The confound nobody looks for, and the reason the real-time factor is
+    reported beside the gap. The node ticks at 20 Hz on a wall clock like a
+    robot; at a real-time factor of 0.5 that is 40 Hz of sim time, so the policy
+    issues two actions per 50 ms of simulated world where training issued one.
+    That is a different control problem, not staleness, and it lands in the
+    measured gap indistinguishably."""
+    assert effective_control_hz(1.0) == pytest.approx(contract.CONTROL_HZ)
+    assert effective_control_hz(0.5) == pytest.approx(2 * contract.CONTROL_HZ)
+    assert effective_control_hz(2.0) == pytest.approx(contract.CONTROL_HZ / 2)
+
+
+def test_an_unmeasurable_real_time_factor_is_nan_not_a_division_error():
+    assert math.isnan(effective_control_hz(0.0))
+    assert math.isnan(effective_control_hz(math.nan))
 
 
 def test_the_default_episode_count_is_the_full_held_out_set():
