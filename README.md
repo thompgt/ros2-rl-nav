@@ -87,6 +87,29 @@ Gymnasium · Stable-Baselines3 ≥ 2.3 · PyTorch (CPU)
 Everything runs in a container. Development host here is Windows 11 +
 Docker Desktop, headless.
 
+## Skills this exercises
+
+Every row points at the code that demonstrates it, because a list of
+technologies is worth nothing on its own — the interesting question is always
+*which specific problem in that technology was solved, and how*.
+
+| Area | The specific problem, and where it is solved |
+|---|---|
+| **ROS 2 (Jazzy)** | Concurrency, not tutorials: a `MultiThreadedExecutor` with `ReentrantCallbackGroup`/`MutuallyExclusiveCallbackGroup` so a blocking service call inside a callback cannot deadlock the node — `observation_node.py`, `sim_control.py`, `policy_node.py`. No `spin_once()` in any loop |
+| **Gazebo Harmonic** | The current `gz-sim` API, not Gazebo Classic: `ControlWorld` for stepping, `SetPose` for teleporting, and an SDF world/model authored by hand — `worlds/arena.sdf`, `models/diffbot/` |
+| **The ROS ↔ sim boundary** | `ros_gz_bridge` topic *and service* mapping, and the fact that a misconfigured bridge produces **silence rather than an error** — hence `scripts/verify_phase1.sh`, which turns each silent failure into a printed FAIL |
+| **Robotics fundamentals** | Frames done explicitly: world vs `odom`, a body-frame goal re-planted at reset (`env.py`), dead-reckoned drift left *visible* in the GIF rather than corrected with ground truth (`record.py`), quaternion → yaw, angle wrapping |
+| **Sensor processing** | **Min**-pooling 360 beams to 20, because mean-pooling averages a chair leg into free space and the policy drives into it. NaN/inf handled before clipping, not after — `observation.py` |
+| **Reinforcement learning** | Gymnasium `Env` written against `check_env`, SAC and PPO via SB3, `VecNormalize`, `SubprocVecEnv` over N isolated simulators, a held-out eval set, a goal-distance curriculum, and reward shaping designed against specific hacks (spinning, oscillating) — `env.py`, `train.py`, `hyperparams.py`, `callbacks.py` |
+| **RL methodology** | Three seeds minimum, mean ± std, a fixed eval set generated from a seed training never uses, and *timeout* rate reported alongside collision rate — because a policy that learns to stand still looks safe on every other metric. `eval_set.py`, `report.py` |
+| **Sim-to-real reasoning** | The project's actual thesis: a step-synchronized trainer and a free-running deployment differing in **exactly one** respect, so the difference between them is attributable. Measured, not asserted — `deploy_eval.py` |
+| **Deployment / inference** | TorchScript export with the traced graph verified against `model.predict` over the observation box *before anything is written*, so no SB3 on the robot — `export_policy.py` |
+| **Safety engineering** | A hard stop and a watchdog that sit **upstream** of the episode logic, not downstream of it, and are pure functions with unit tests — `deploy.py` |
+| **Real-time systems** | Observation staleness measured (mean/p95/max), watchdog misses counted, and the real-time-factor confound in the headline number reported rather than buried — `policy_node.py`, `deploy_eval.py` |
+| **Architecture** | "Pure core, ROS shell": every piece of arithmetic lives in a ROS-free module that runs on a Windows laptop in milliseconds, and the ROS layer only moves messages. That is why 219 tests run without a simulator |
+| **Testing** | Property tests over the contract, SDF-vs-constants cross-checks that catch a world edited out from under the code, `sim`-marked integration tests, and PASS/FAIL verification scripts per phase |
+| **Infrastructure** | A reproducible ROS 2 + Gazebo image, one-command training via compose, and CI that runs the full stack *inside that image* — the only place `rclpy`, torch and SB3 coexist |
+
 ## Quick start
 
 ```bash
@@ -106,6 +129,7 @@ make evaluate MODEL=runs/sac-seed0/best/best_model.zip  # step-synchronized scor
 make export-policy MODEL=runs/sac-seed0/best/best_model.zip   # -> policy.pt
 make gap                                                # free-running score + delta
 make report                                             # aggregate seeds -> README tables
+make gif MODEL=runs/sac-seed0/best/best_model.zip       # one episode as a GIF
 make deploy POLICY=runs/sac-seed0/policy.pt             # drive it interactively
 make board                                              # TensorBoard on :6006
 ```
@@ -129,6 +153,7 @@ docker/docker-compose.yml up train`.
 | `policy_node.py` | Phase 4 ROS 2 inference node: subscriptions, a timer, a publisher |
 | `export_policy.py` | SB3 `.zip` → TorchScript `.pt`, verified against `model.predict` |
 | `deploy_eval.py` | The gap measurement |
+| `record.py` | One scored episode as a top-down GIF, drawn from the policy's 26-vector |
 | `report.py` | Seed aggregation — the only thing that reads across runs. Writes the tables below |
 | `eval_set.py` | The held-out episodes, generated from a seed training never uses |
 | `hyperparams.py` | SAC/PPO configuration and every run-shaping constant |
@@ -224,8 +249,9 @@ the remaining work.
 - Run training. Three seeds × two algorithms, then `make report` — the tables
   above fill themselves from the per-run JSON.
 - Take the gap measurement on a host that sustains a real-time factor near 1.
-- A GIF of a trained policy in the first 100 px of this README. There is no
-  trained policy yet, so there is nothing honest to record.
+- A GIF of a trained policy in the first 100 px of this README. The recorder is
+  built and tested (`make gif`); there is no trained policy yet, so there is
+  nothing honest to record.
 
 ## License
 
