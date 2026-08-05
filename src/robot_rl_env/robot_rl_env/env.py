@@ -72,6 +72,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
 from robot_rl_env import arena, contract
+from robot_rl_env.action import clip_action, scale_action
 from robot_rl_env.observation import from_body_frame, to_body_frame
 from robot_rl_env.observation_node import ObservationAssembler
 from robot_rl_env.sim_control import SimControl
@@ -300,9 +301,7 @@ class RobotNavEnv(gym.Env):
                 "step() before reset(), or after a terminal step. Gymnasium "
                 "requires reset() to start an episode."
             )
-        action = np.clip(
-            np.asarray(action, dtype=np.float32).reshape(contract.ACT_DIM), -1.0, 1.0
-        )
+        action = clip_action(action)
 
         # 1. act
         self._publish_velocity(*self.scale_action(action))
@@ -374,17 +373,15 @@ class RobotNavEnv(gym.Env):
 
     # --- helpers --------------------------------------------------------------
 
-    @staticmethod
-    def scale_action(action) -> tuple[float, float]:
-        """``[-1, 1]^2`` -> ``(v, omega)``. See CONTRACTS.md ("Action space").
+    scale_action = staticmethod(scale_action)
+    """``[-1, 1]^2`` -> ``(v, omega)``. See ``action.py``.
 
-        ``a[0] = -1`` is a full stop, not reverse: a policy that can back out of
-        a concave obstacle never has to learn to avoid entering it.
-        """
-        a = np.clip(np.asarray(action, dtype=np.float32), -1.0, 1.0)
-        v = contract.MAX_LINEAR_VEL * (float(a[0]) + 1.0) / 2.0
-        omega = contract.MAX_ANGULAR_VEL * float(a[1])
-        return v, omega
+    Re-exported rather than reimplemented: ``policy_node.py`` needs the same
+    mapping and cannot import this module, so the implementation lives in the
+    pure ``action`` module and both callers share it. The alias is kept because
+    the env reads better for it and because the scaling is genuinely part of
+    this class's contract with CONTRACTS.md.
+    """
 
     def _advance(self, iterations: int) -> None:
         """Step the simulator and track the sim time it now holds.

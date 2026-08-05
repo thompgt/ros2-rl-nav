@@ -23,7 +23,7 @@ pytest.importorskip("rclpy", reason="ROS 2 is not available on this host")
 
 from gymnasium.utils.env_checker import check_env  # noqa: E402
 
-from robot_rl_env import arena, contract, sim_launcher  # noqa: E402
+from robot_rl_env import action, arena, contract, sim_launcher  # noqa: E402
 from robot_rl_env.env import RobotNavEnv  # noqa: E402
 from robot_rl_env.observation import from_body_frame  # noqa: E402
 
@@ -415,23 +415,12 @@ def test_reset_actually_teleports_the_robot_to_the_sampled_pose(env):
         )
 
 
-# --- action scaling (pure) ----------------------------------------------------
+# --- action scaling -----------------------------------------------------------
 
-def test_action_scaling_matches_the_contract():
-    assert RobotNavEnv.scale_action([-1.0, 0.0]) == (0.0, 0.0)
-    assert RobotNavEnv.scale_action([1.0, 0.0]) == (contract.MAX_LINEAR_VEL, 0.0)
-    assert RobotNavEnv.scale_action([0.0, 0.0]) == (contract.MAX_LINEAR_VEL / 2, 0.0)
-    assert RobotNavEnv.scale_action([-1.0, 1.0]) == (0.0, contract.MAX_ANGULAR_VEL)
-    assert RobotNavEnv.scale_action([-1.0, -1.0]) == (0.0, -contract.MAX_ANGULAR_VEL)
-    # Out-of-range input is clipped, never scaled past the envelope.
-    assert RobotNavEnv.scale_action([5.0, 5.0]) == (
-        contract.MAX_LINEAR_VEL,
-        contract.MAX_ANGULAR_VEL,
-    )
-
-
-def test_no_action_can_command_reverse():
-    """`a[0] = -1` is a stop. See CONTRACTS.md ("Action space")."""
-    for a0 in np.linspace(-3.0, 3.0, 101):
-        v, _ = RobotNavEnv.scale_action([a0, 0.0])
-        assert 0.0 <= v <= contract.MAX_LINEAR_VEL
+def test_the_env_scales_actions_through_the_shared_implementation():
+    """The arithmetic itself is covered by ``test_action.py``, which runs on the
+    host with no simulator. What is worth asserting *here* is that the env has
+    not quietly grown a second copy of it: ``policy_node.py`` scales actions
+    through ``action.scale_action``, and a divergence between the two is the
+    training/inference failure that logs nothing."""
+    assert RobotNavEnv.scale_action is action.scale_action
