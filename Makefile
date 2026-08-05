@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint train evaluate export-policy board deploy world clean
+.PHONY: help build shell test verify verify2 lint train evaluate export-policy board deploy gap world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -14,7 +14,8 @@ help:
 	@echo "evaluate - Phase 3 evaluation: make evaluate MODEL=<path to .zip>"
 	@echo "export-policy - TorchScript export: make export-policy MODEL=<path to .zip>"
 	@echo "board    - TensorBoard over runs/ on port 6006"
-	@echo "deploy   - Phase 4"
+	@echo "deploy   - Phase 4: run the policy against a free-running world"
+	@echo "gap      - Phase 4 measurement: free-running vs step-synchronized"
 	@echo "clean    - remove colcon build artifacts"
 
 build:
@@ -93,6 +94,16 @@ board:
 POLICY ?= runs/$(ALGO)-seed$(SEED)/policy.pt
 deploy:
 	POLICY=$(POLICY) $(COMPOSE) run --rm deploy
+
+# The Phase 4 measurement. Scores the exported policy on the same held-out
+# episodes as `make evaluate`, but free-running, and prints the two side by
+# side. Run `make evaluate` first so there is a baseline to subtract.
+gap:
+	$(COMPOSE) run --rm train bash -lc "colcon build --symlink-install \
+	  && source install/setup.bash \
+	  && python3 -m robot_rl_env.deploy_eval --policy $(POLICY) \
+	     --baseline runs/$(ALGO)-seed$(SEED)/eval.json \
+	     --json runs/$(ALGO)-seed$(SEED)/gap.json"
 
 clean:
 	rm -rf build install log

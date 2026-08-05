@@ -90,7 +90,13 @@ class PolicyNode(Node):
     executor -- :func:`main` does that, and so does ``deploy_eval.py``.
     """
 
-    def __init__(self, *, context=None, node_name: str = "policy_node"):
+    def __init__(
+        self,
+        *,
+        context=None,
+        node_name: str = "policy_node",
+        policy_path: str | None = None,
+    ):
         super().__init__(node_name, context=context)
 
         self.declare_parameter("policy", "")
@@ -98,7 +104,12 @@ class PolicyNode(Node):
         self.declare_parameter("control_hz", float(contract.CONTROL_HZ))
         self.declare_parameter("goal_frame", ODOM_FRAME)
 
-        policy_path = self.get_parameter("policy").value
+        # The argument wins over the parameter so ``deploy_eval`` can build this
+        # node directly. That matters more than it looks: the alternative is a
+        # measurement harness that reimplements the control loop, and then the
+        # reported sim-to-deployment gap belongs to the harness rather than to
+        # the node anyone would actually run.
+        policy_path = policy_path or self.get_parameter("policy").value
         if not policy_path:
             raise ValueError(
                 "the 'policy' parameter is required: pass "
