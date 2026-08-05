@@ -64,6 +64,7 @@ measuring instrument.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -116,6 +117,51 @@ class Command:
     @property
     def is_policy(self) -> bool:
         return self.reason == "policy"
+
+
+class TickStatistics:
+    """What the control loop actually did, accumulated over a run.
+
+    The Phase 4 headline is a difference in success rate, and a difference in
+    success rate on its own is an observation, not an explanation. These are
+    the numbers that turn it into one: how stale the observations were, how
+    often the watchdog fired, how often the safety layer had to act. A gap with
+    a p95 observation age of 12 ms means something entirely different from the
+    same gap with a p95 of 300 ms and 4% watchdog ticks, and no amount of
+    staring at the success rates distinguishes them.
+
+    Pure and cumulative. ``policy_node`` feeds it; ``deploy_eval`` reads it.
+    """
+
+    def __init__(self):
+        self.ticks = 0
+        self.reasons: Counter[str] = Counter()
+        self._ages: list[float] = []
+
+    def record(self, reason: str, age: float) -> None:
+        self.ticks += 1
+        self.reasons[reason] += 1
+        # An infinite age -- no sample has ever arrived -- is counted as a
+        # watchdog tick but not as an age. One inf makes the mean inf and the
+        # percentiles meaningless, which would hide the very distribution this
+        # exists to show.
+        if math.isfinite(age):
+            self._ages.append(float(age))
+
+    def fraction(self, reason: str) -> float:
+        return self.reasons[reason] / self.ticks if self.ticks else 0.0
+
+    def summary(self) -> dict:
+        ages = np.asarray(self._ages, dtype=np.float64)
+        return {
+            "ticks": self.ticks,
+            "policy_fraction": self.fraction("policy"),
+            "watchdog_fraction": self.fraction("watchdog"),
+            "safety_fraction": self.fraction("safety"),
+            "obs_age_mean": float(ages.mean()) if ages.size else float("nan"),
+            "obs_age_p95": float(np.percentile(ages, 95)) if ages.size else float("nan"),
+            "obs_age_max": float(ages.max()) if ages.size else float("nan"),
+        }
 
 
 class DeploymentController:

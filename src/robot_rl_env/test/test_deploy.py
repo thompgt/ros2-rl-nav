@@ -14,7 +14,7 @@ import pytest
 
 from robot_rl_env import contract
 from robot_rl_env.action import STOP
-from robot_rl_env.deploy import DeploymentController, Outcome
+from robot_rl_env.deploy import DeploymentController, Outcome, TickStatistics
 
 CLEAR = np.full(contract.N_BEAMS, contract.LIDAR_MAX, dtype=np.float32)
 """A scan with nothing in it."""
@@ -302,3 +302,39 @@ def test_an_out_of_range_policy_output_is_clipped_not_scaled():
     command = tick(ctrl)
     assert command.linear == pytest.approx(contract.MAX_LINEAR_VEL)
     assert command.angular == pytest.approx(-contract.MAX_ANGULAR_VEL)
+
+
+# --- tick statistics ----------------------------------------------------------
+
+def test_statistics_report_the_shape_of_the_control_loop():
+    stats = TickStatistics()
+    for age in (0.01, 0.02, 0.03):
+        stats.record("policy", age)
+    stats.record("watchdog", 0.5)
+
+    summary = stats.summary()
+    assert summary["ticks"] == 4
+    assert summary["policy_fraction"] == pytest.approx(0.75)
+    assert summary["watchdog_fraction"] == pytest.approx(0.25)
+    assert summary["obs_age_max"] == pytest.approx(0.5)
+
+
+def test_an_infinite_age_is_counted_but_not_averaged():
+    """"No sample has ever arrived" is a watchdog tick with no meaningful age.
+    One inf makes the mean inf and the percentiles useless -- which would hide
+    exactly the staleness distribution these numbers exist to show."""
+    stats = TickStatistics()
+    stats.record("watchdog", float("inf"))
+    stats.record("policy", 0.02)
+
+    summary = stats.summary()
+    assert summary["ticks"] == 2
+    assert summary["watchdog_fraction"] == pytest.approx(0.5)
+    assert summary["obs_age_mean"] == pytest.approx(0.02)
+
+
+def test_statistics_over_no_ticks_do_not_divide_by_zero():
+    summary = TickStatistics().summary()
+    assert summary["ticks"] == 0
+    assert summary["policy_fraction"] == 0.0
+    assert math.isnan(summary["obs_age_mean"])

@@ -60,7 +60,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 
 from robot_rl_env import contract
-from robot_rl_env.deploy import DeploymentController, Outcome
+from robot_rl_env.deploy import DeploymentController, Outcome, TickStatistics
 from robot_rl_env.export_policy import load_policy
 from robot_rl_env.observation_node import ObservationAssembler
 
@@ -111,6 +111,11 @@ class PolicyNode(Node):
 
         self.observations = ObservationAssembler(f"{node_name}_observations", context=context)
         self.controller = DeploymentController(load_policy(policy_path))
+        # Accumulated across the whole session, not per episode: the thing worth
+        # knowing is the distribution of observation staleness this deployment
+        # ran under, and that is a property of the machine and the bridge rather
+        # than of any one episode.
+        self.stats = TickStatistics()
 
         self._cmd_pub = self.create_publisher(Twist, "/cmd_vel", CMD_QOS)
 
@@ -177,8 +182,9 @@ class PolicyNode(Node):
     def _on_tick(self) -> None:
         latest = self.observations.latest_sample()
         if latest is None:
+            age = STALE_FOREVER
             command = self.controller.tick(
-                pooled=None, robot_xy=None, robot_yaw=None, age=STALE_FOREVER
+                pooled=None, robot_xy=None, robot_yaw=None, age=age
             )
         else:
             sample, age = latest
@@ -187,6 +193,7 @@ class PolicyNode(Node):
             )
 
         self._publish(command.linear, command.angular)
+        self.stats.record(command.reason, age)
         self._log_transition(command)
 
     def _publish(self, linear: float, angular: float) -> None:

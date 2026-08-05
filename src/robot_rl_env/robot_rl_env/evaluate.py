@@ -96,8 +96,14 @@ def summarize_rollouts(results: list[dict]) -> dict:
         "success_rate": len(successes) / n,
         "collision_rate": sum(r["collided"] for r in results) / n,
         "timeout_rate": sum(not r["success"] and not r["collided"] for r in results) / n,
-        "mean_reward": sum(r["reward"] for r in results) / n,
     }
+    # Reward is optional, and only Phase 4 omits it. The deployment loop has no
+    # reward: computing one there would mean a second implementation of the
+    # contract's reward function living outside env.step, which is the kind of
+    # duplication this project treats as a defect rather than a convenience.
+    # Reporting nan instead would put a number-shaped hole in the results table.
+    if all("reward" in r for r in results):
+        metrics["mean_reward"] = sum(r["reward"] for r in results) / n
     if successes:
         # Successes only. A failed episode's path length measures how long it
         # wandered before hitting a wall, and averaging that in rewards a

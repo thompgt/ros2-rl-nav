@@ -69,6 +69,17 @@ def test_a_policy_that_never_succeeds_reports_nan_not_zero():
     assert math.isnan(m["mean_path_efficiency"])
 
 
+def test_reward_is_omitted_rather_than_faked_when_the_loop_has_none():
+    """The deployment loop computes no reward, and giving it one would mean a
+    second implementation of the contract's reward function outside env.step.
+    The metric is dropped rather than reported as nan, which would put a
+    number-shaped hole in the results table."""
+    rewardless = [{k: v for k, v in _record(success=True).items() if k != "reward"}]
+    metrics = summarize_rollouts(rewardless)
+    assert "mean_reward" not in metrics
+    assert metrics["success_rate"] == 1.0
+
+
 def test_an_empty_run_raises():
     with pytest.raises(ValueError):
         summarize_rollouts([])
