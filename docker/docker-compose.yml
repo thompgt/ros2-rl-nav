@@ -52,13 +52,17 @@ services:
     <<: *common
     command: bash -lc "scripts/verify_phase2.sh"
 
-  # Phase 3. Not implemented yet.
+  # Phase 3. `make train` overrides this command to pass --algo/--seed/--n-envs;
+  # this default is what `docker compose up train` reproduces. Port 6006 is
+  # published for `make board`, which reuses this service.
   train:
     <<: *common
+    ports:
+      - "6006:6006"
     command: >
       bash -lc "colcon build --symlink-install
       && source install/setup.bash
-      && python3 -m robot_rl_env.train"
+      && python3 -m robot_rl_env.train --algo sac --seed 0"
 
   # Phase 4. Not implemented yet.
   deploy:

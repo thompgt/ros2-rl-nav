@@ -229,7 +229,10 @@ def describe() -> str:
     """
     lines = [
         f"policy={POLICY} net_arch={NET_ARCH}",
-        f"n_envs={N_ENVS} eval_freq={EVAL_FREQ} checkpoint_freq={CHECKPOINT_FREQ}",
+        # N_ENVS is deliberately absent: it is a per-run choice that train.py
+        # prints on its own line, and printing the module default here made a
+        # one-worker run's config.txt claim n_envs=4 two lines below the truth.
+        f"eval_freq={EVAL_FREQ} checkpoint_freq={CHECKPOINT_FREQ}",
         f"normalize_obs={NORMALIZE_OBS} normalize_reward={NORMALIZE_REWARD} "
         f"clip_reward={CLIP_REWARD}",
         f"curriculum={CURRICULUM_START_RADIUS}m -> {CURRICULUM_MAX_RADIUS:.2f}m "

@@ -1,6 +1,6 @@
 COMPOSE := docker compose -f docker/docker-compose.yml
 
-.PHONY: help build shell test verify verify2 lint train deploy world clean
+.PHONY: help build shell test verify verify2 lint train evaluate board deploy world clean
 
 help:
 	@echo "build    - build the ROS 2 Jazzy + Gazebo Harmonic image"
@@ -10,7 +10,9 @@ help:
 	@echo "verify2  - Phase 2 exit criteria: 100 random episodes, throughput, memory"
 	@echo "lint     - ruff check"
 	@echo "world    - launch the arena headless (paused), for manual poking"
-	@echo "train    - Phase 3"
+	@echo "train    - Phase 3 training: make train ALGO=sac SEED=0 ENVS=4"
+	@echo "evaluate - Phase 3 evaluation: make evaluate MODEL=<path to .zip>"
+	@echo "board    - TensorBoard over runs/ on port 6006"
 	@echo "deploy   - Phase 4"
 	@echo "clean    - remove colcon build artifacts"
 
@@ -41,8 +43,33 @@ world:
 	  && source install/setup.bash \
 	  && ros2 launch robot_rl_env world.launch.py headless:=true"
 
+# make train ALGO=ppo SEED=1 ENVS=4 -- same reason as EPISODES above: arguments
+# cannot be appended to `compose run <service>`.
+#
+# Training runs for hours. Launch it yourself and read the TensorBoard scalars
+# or runs/<algo>-seed<N>/config.txt afterwards; do not run it inside an agent
+# loop, which will sit on the output for the whole run and learn nothing.
+ALGO ?= sac
+SEED ?= 0
+ENVS ?= 4
 train:
-	$(COMPOSE) run --rm train
+	$(COMPOSE) run --rm train bash -lc "colcon build --symlink-install \
+	  && source install/setup.bash \
+	  && python3 -m robot_rl_env.train --algo $(ALGO) --seed $(SEED) --n-envs $(ENVS)"
+
+# make evaluate MODEL=runs/sac-seed0/best/best_model.zip
+MODEL ?= runs/$(ALGO)-seed$(SEED)/best/best_model.zip
+evaluate:
+	$(COMPOSE) run --rm train bash -lc "colcon build --symlink-install \
+	  && source install/setup.bash \
+	  && python3 -m robot_rl_env.evaluate --model $(MODEL) \
+	     --json runs/$(ALGO)-seed$(SEED)/eval.json"
+
+# TensorBoard on all runs at once, so seeds and algorithms are compared on one
+# axis rather than by flipping between screenshots.
+board:
+	$(COMPOSE) run --rm --service-ports train bash -lc \
+	  "tensorboard --logdir runs --host 0.0.0.0 --port 6006"
 
 deploy:
 	$(COMPOSE) run --rm deploy

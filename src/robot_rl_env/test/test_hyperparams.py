@@ -92,8 +92,15 @@ def test_the_curriculum_ends_where_the_evaluation_set_ends():
 def test_describe_names_every_run_shaping_value():
     """The run log has to be enough to reproduce the run."""
     text = hyperparams.describe()
-    for expected in ("sac:", "ppo:", "n_envs", "normalize_reward", "curriculum", "net_arch"):
+    for expected in ("sac:", "ppo:", "eval_freq", "normalize_reward", "curriculum", "net_arch"):
         assert expected in text
+
+
+def test_describe_does_not_claim_a_worker_count():
+    """n_envs is a per-run choice that train.py prints from its own arguments.
+    Printing the module default here made a one-worker run's config.txt claim
+    n_envs=4, two lines below the line that said 1."""
+    assert "n_envs" not in hyperparams.describe()
 
 
 # --- checked against the real SB3 signatures, where it is installed ----------
