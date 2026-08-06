@@ -265,8 +265,8 @@ class RobotNavEnv(gym.Env):
             # place upstream that all of them pass through.
             arena.validate_episode((rx, ry), goal_world)
 
-        # Brake to a stop, then teleport. Not ControlWorld(reset.all), which
-        # CONTRACTS.md asks for: it drops the set_pose that follows it about
+        # Brake to a stop, then teleport, as CONTRACTS.md specifies. Not
+        # ControlWorld(reset.all): it drops the set_pose that follows it about
         # half the time and wedges the server outright under repeated use. See
         # contract.BRAKE_ITERATIONS for both measurements and what this costs.
         self._publish_velocity(0.0, 0.0)

@@ -152,18 +152,19 @@ the whole project.
 `reset(seed=None, options=None)` must:
 
 1. Seed a `np.random.Generator` from `seed` via `super().reset(seed=seed)`.
-2. Bring the robot to rest: command zero velocity and advance
-   **1000 physics iterations** (`contract.BRAKE_ITERATIONS`) before teleporting.
-   See "Why reset does not restore the world" below.
-3. Sample a robot pose: `(x, y)` uniform in the arena, yaw uniform in [−π, π],
+2. Sample a robot pose: `(x, y)` uniform in the arena, yaw uniform in [−π, π],
    rejecting samples closer than **0.4 m** to any obstacle or wall.
-4. Sample a goal `(x, y)` under the same free-space rejection, additionally
+3. Sample a goal `(x, y)` under the same free-space rejection, additionally
    rejecting samples closer than **1.0 m** to the sampled robot position (an
    already-solved episode teaches nothing).
-5. Teleport the robot via the sim `set_pose` service, zero its velocity,
-   advance **one** sim step so sensors repopulate, and assemble the first
-   observation.
-6. Return `(obs, info)`.
+4. Bring the robot to rest: command zero velocity and advance
+   **1000 physics iterations** (`contract.BRAKE_ITERATIONS`). See "Why reset
+   does not restore the world" below.
+5. Teleport the robot via the sim `set_pose` service, then advance **one** sim
+   step (50 iterations) — `set_pose` is queued by `UserCommands` and applied on
+   the next iteration, so this both lands the teleport and produces the first
+   scan from the new pose.
+6. Assemble the first observation and return `(obs, info)`.
 
 ### Why reset does not restore the world
 
