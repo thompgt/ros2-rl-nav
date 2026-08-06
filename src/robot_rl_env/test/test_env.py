@@ -75,9 +75,10 @@ def test_check_env_passes_except_for_step_determinism(simulator):
     sub-millimetre pose differences that a LiDAR beam grazing an obstacle edge
     amplifies into a large single-channel divergence.
 
-    See ``contract.BRAKE_ITERATIONS`` for the measurements, and
-    ``test_same_seed_and_actions_give_identical_observations`` for the bound
-    that replaces the exact check.
+    ``check_env`` is stricter than this project's contract, not in conflict
+    with it: CONTRACTS.md ("Determinism requirement") specifies a table of
+    bounds, which ``test_same_seed_and_actions_give_identical_observations``
+    asserts. See ``contract.BRAKE_ITERATIONS`` for the measurements.
 
     Tolerating it *by message* rather than skipping the whole call is the point:
     every other conformance check -- spaces, dtypes, reset signature, info
@@ -90,7 +91,7 @@ def test_check_env_passes_except_for_step_determinism(simulator):
     except AssertionError as exc:
         if "Deterministic step observations are not equivalent" not in str(exc):
             raise
-        pytest.xfail(f"known deviation from CONTRACTS.md determinism: {exc}")
+        pytest.xfail(f"bit-equality, which CONTRACTS.md replaces with a bound: {exc}")
     finally:
         e.close()
 
