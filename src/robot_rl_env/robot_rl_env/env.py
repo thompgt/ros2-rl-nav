@@ -35,10 +35,11 @@ This is exact whatever odom happens to read after the reset, which is the point
 internals, and it would fail silently, as a goal quietly displaced by however
 much odometry drifted.
 
-Reset, and a documented deviation from CONTRACTS.md
---------------------------------------------------
-CONTRACTS.md says reset restores the world to its initial state. This does not
-call ``ControlWorld(reset.all)``: measured against Harmonic, that service drops
+Reset
+-----
+CONTRACTS.md ("Why reset does not restore the world") specifies braking rather
+than a world reset. This does not call ``ControlWorld(reset.all)``: measured
+against Harmonic, that service drops
 the ``set_pose`` that has to follow it about half the time, and wedges the
 server outright under repeated use. An episode brakes the robot to a stop and
 teleports instead. The cost is that episodes are reproducible in their initial
@@ -219,18 +220,17 @@ class RobotNavEnv(gym.Env):
     # --- gymnasium API --------------------------------------------------------
 
     def reset(self, *, seed=None, options=None):
-        """See CONTRACTS.md ("Reset").
+        """See CONTRACTS.md ("Reset", "Reset options").
 
-        ``options``:
+        ``options`` -- both keys are specified, and mutually exclusive:
 
         - ``{"goal_radius": r}`` caps the start-goal distance. The Phase 3
-          curriculum hook, specified in CONTRACTS.md.
+          curriculum hook.
         - ``{"start": (x, y, yaw), "goal": (x, y)}`` replaces sampling with a
-          fixed episode, in **world** coordinates. Not in CONTRACTS.md; added
-          for Phase 3, which needs a held-out evaluation set that is identical
-          across algorithms, seeds and checkpoints. Comparing a SAC run against
-          a PPO run on two different sets of random episodes measures the
-          sampler as much as the policies.
+          fixed episode, in **world** coordinates. Phase 3 needs a held-out
+          evaluation set that is identical across algorithms, seeds and
+          checkpoints: comparing a SAC run against a PPO run on two different
+          sets of random episodes measures the sampler as much as the policies.
         """
         super().reset(seed=seed)
         options = options or {}
