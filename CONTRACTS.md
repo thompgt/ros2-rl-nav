@@ -238,11 +238,34 @@ tolerated **by message** rather than skipped, so that every other conformance
 check it performs — spaces, dtypes, reset signature, info contents, seeding —
 still has to pass, and any new failure still fails.
 
-### Curriculum hook
+### Reset options
 
-`options={"goal_radius": r}` optionally caps the sampled goal distance at `r`
-metres. Phase 3 uses this to start goals within 2 m and expand as success rate
-crosses 70%. Default (`None`) is the full arena.
+Two keys, mutually exclusive. Passing both raises rather than resolving a
+precedence — a caller that supplies a goal radius *and* a fixed goal has a
+confused intent, and silently honouring one of them would produce an evaluation
+set quietly narrower than the one asked for.
+
+**`options={"goal_radius": r}` — the curriculum hook.** Caps the sampled
+start-goal distance at `r` metres. Phase 3 starts goals within 2 m and expands
+as success rate crosses 70%. Default (`None`) is the full arena. It may also be
+set once as env state rather than per call, because SB3 cannot thread a
+per-reset option through a vectorized reset.
+
+**`options={"start": (x, y, yaw), "goal": (x, y)}` — the fixed episode.**
+Replaces sampling entirely, in **world** coordinates. Both must be given
+together; one without the other raises. The pair is validated against the same
+free-space rejection the sampler uses (`arena.validate_episode`), so a fixed
+episode cannot start inside an obstacle or specify an already-solved goal.
+
+The fixed episode is what makes evaluation a measurement. `eval_set.episodes()`
+generates a held-out set from a seed training never uses, and every run is
+scored on that same set: two runs then differ by the policy rather than by
+which episodes they happened to draw. Scoring on fresh random draws would let
+the sampler move the number by as much as the policy does. Goals in the set are
+additionally capped at `eval_set.MAX_EVAL_DISTANCE`, because 500 steps at
+0.4 m/s covers 10.0 m and the arena diagonal is 14.15 m — the unrestricted
+sampler can emit episodes no policy can finish, which is a harmless hard
+negative in training and an unknown, moving ceiling on an evaluation set.
 
 ---
 
