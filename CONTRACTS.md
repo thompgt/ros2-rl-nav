@@ -289,15 +289,28 @@ negative in training and an unknown, moving ceiling on an evaluation set.
 
 ## Shared-code requirement
 
-The mapping from `(LaserScan, Odometry, goal, prev_action, step_count)` to a
-26-vector lives in **exactly one** function:
+**Every transformation on either side of the policy lives in exactly one
+function, called by both training and deployment.** Two of them exist:
 
 ```python
-robot_rl_env.observation.assemble_observation(...)
+robot_rl_env.observation.assemble_observation(...)   # sensors -> 26-vector
+robot_rl_env.action.scale_action(...)                # 2-vector -> (v, omega)
 ```
 
-The training environment (`env.py`) and the deployment node (`policy_node.py`)
-both call it. Neither reimplements it, partially or otherwise. Divergence
-between training-time and inference-time preprocessing is the classic silent
-failure of this kind of project: nothing errors, and the policy is simply worse
-in deployment for reasons no log will show you.
+The training environment (`env.py`) calls both directly. The deployment node
+(`policy_node.py`) reaches them through `ObservationAssembler` and
+`deploy.DeploymentController`, which are thin wrappers over the same two
+functions. Neither side reimplements either, partially or otherwise.
+
+Divergence between training-time and inference-time preprocessing is the
+classic silent failure of this kind of project: nothing errors, and the policy
+is simply worse in deployment for reasons no log will show you. The argument is
+verbatim the same on the action side — a redeclared `0.4` or a sign flip on
+`omega` produces a policy that steers slightly wrong and no diagnostic
+anywhere. The observation direction is merely the one people think of first.
+
+The same rule crosses languages. The Phase 6 web monitor does no geometry in
+the browser: `monitor.py` reads the scan through the same
+`ObservationAssembler` the policy does and hands `web/app.js` world-frame line
+segments, because a second implementation in JavaScript would be harder to
+notice than one in Python, not easier.
