@@ -142,6 +142,31 @@ blamed for them:
   policy actually sees. There is no trained policy yet, so there is nothing
   honest to record.
 
+## Phase 6 — The live monitor ✅ built, smoke-tested
+
+`make monitor POLICY=...` runs the Phase 4 deployment and serves a page on
+:8080: the arena, the robot, the 20 pooled LiDAR sectors, the commanded
+velocities, and — the headline of the panel — the observation age, against the
+fixed 50 ms training saw. Click the arena to send a goal.
+
+- ✅ `monitor.py` — PURE. Every payload; the browser gets no geometry at all
+- ✅ `monitor_server.py` — stdlib `http.server`: the page, an SSE telemetry
+  stream, a goal POST. No new dependency in a 13 GB image, no bundler, no CDN
+- ✅ `monitor_node.py` — reads the scan through the same `ObservationAssembler`
+  the policy does, so the sectors on screen are the numbers the policy received
+- ✅ `web/` — one page, no build step, no vendored JS
+- ✅ `scripts/verify_phase6.sh` / `make verify6` — serves, streams, steers
+
+Two rules it lives under, both in `CLAUDE.md`: the browser gets no geometry,
+and the measurement does not get watched (`make gap` launches
+`deploy.launch.py`; `status_topic` defaults to off).
+
+It draws a dead-reckoned pose. Gazebo's true pose is available and deliberately
+unused — a deployed robot does not have it, and correcting with it would hide
+the drift the policy navigates on.
+
+**What it cannot show yet:** a policy worth watching. Same blocker as the GIF.
+
 ---
 
 ## Reduced-scope fallback

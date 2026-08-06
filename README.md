@@ -117,6 +117,7 @@ make build     # build the ROS 2 Jazzy + Gazebo Harmonic image
 make verify    # Phase 1 bridge verification — PASS/FAIL per check
 make verify2   # Phase 2 exit criteria — episodes, throughput, memory, timing
 make verify4   # Phase 4 smoke — train tiny, export, free-running eval
+make verify6   # Phase 6 smoke — the monitor serves, streams and steers
 make test      # colcon build + pytest
 make shell     # interactive container shell, repo mounted at /ws
 ```
@@ -131,6 +132,7 @@ make gap                                                # free-running score + d
 make report                                             # aggregate seeds -> README tables
 make gif MODEL=runs/sac-seed0/best/best_model.zip       # one episode as a GIF
 make deploy POLICY=runs/sac-seed0/policy.pt             # drive it interactively
+make monitor POLICY=runs/sac-seed0/policy.pt            # ...and watch it on :8080
 make board                                              # TensorBoard on :6006
 ```
 
@@ -154,6 +156,9 @@ docker/docker-compose.yml up train`.
 | `export_policy.py` | SB3 `.zip` → TorchScript `.pt`, verified against `model.predict` |
 | `deploy_eval.py` | The gap measurement |
 | `record.py` | One scored episode as a top-down GIF, drawn from the policy's 26-vector |
+| `monitor.py` | Every payload the live web monitor sends — pure, and the only place its geometry lives |
+| `monitor_server.py` | The page, an SSE telemetry stream, a goal POST. Standard library only |
+| `monitor_node.py` | The monitor's ROS end: a passive observer, plus clicks → `/goal_pose` |
 | `report.py` | Seed aggregation — the only thing that reads across runs. Writes the tables below |
 | `eval_set.py` | The held-out episodes, generated from a seed training never uses |
 | `hyperparams.py` | SAC/PPO configuration and every run-shaping constant |
@@ -244,6 +249,51 @@ strays more than 10% from 1. A headline gap taken on this machine would be part
 architecture and part hardware; taking it on a machine that sustains RTF ≈ 1 is
 the remaining work.
 
+## Watching one, live
+
+```bash
+make monitor POLICY=runs/sac-seed0/policy.pt   # then open http://localhost:8080
+```
+
+The same free-running deployment as `make deploy`, with a browser window onto
+it: the arena, the robot's dead-reckoned pose, the **20 min-pooled LiDAR
+sectors the policy receives** — not the 360 raw beams — the commanded
+velocities, and the observation age beside the fixed 50 ms training saw. Click
+anywhere free to publish a goal on `/goal_pose`.
+
+Three decisions are worth naming, because each has an easier alternative that
+would quietly make the view dishonest.
+
+**The browser gets no geometry.** No pooling, no beam angles, no quaternions,
+no odom→world transform in `app.js`. It plots world-frame line segments handed
+to it by `monitor.py`, which reads the scan through the same
+`ObservationAssembler` the policy does. The whole project's defence against
+training/inference divergence is that there is only one implementation of the
+observation; adding a second one in JavaScript — where nobody would think to
+look — would give that up for a nicer render loop.
+
+**The pose is dead-reckoned, not ground truth.** Gazebo knows exactly where the
+robot is and the monitor deliberately does not ask. It seeds the transform at
+the spawn pose and integrates odometry, as a deployed robot must. So the drawn
+robot slides off the drawn obstacles as odometry drifts — which is the error
+the policy is navigating on, shown rather than corrected away.
+
+**The measurement is not watched.** `make gap` launches `deploy.launch.py`;
+this is `monitor.launch.py`. The policy node's status topic defaults to off and
+`deploy_eval` never turns it on. An HTTP server, a browser and 20 JSON frames a
+second, on a container already at RTF 0.3–0.5, would land in the gap number
+instead of in the picture. Watch a run here; measure a run there.
+
+No build step, no bundler, no CDN, no vendored JS: one HTML file, one CSS file,
+one script, served by `http.server` from the standard library. A debug view
+that needs a Node toolchain in a 13 GB ROS image, or internet access on the
+machine most likely to have none, is a debug view you will not have when you
+need it.
+
+`make verify6` checks all of it in text — the scene, the page, pooled sectors
+on the stream, a goal outside the arena refused, and a goal that reached the
+controller.
+
 ## What's left
 
 - Run training. Three seeds × two algorithms, then `make report` — the tables
@@ -251,7 +301,8 @@ the remaining work.
 - Take the gap measurement on a host that sustains a real-time factor near 1.
 - A GIF of a trained policy in the first 100 px of this README. The recorder is
   built and tested (`make gif`); there is no trained policy yet, so there is
-  nothing honest to record.
+  nothing honest to record. The same blocker applies to a screenshot of the
+  live monitor: it currently shows a policy that has seen 300 training steps.
 
 ## License
 

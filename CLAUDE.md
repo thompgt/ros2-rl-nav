@@ -139,16 +139,22 @@ src/robot_rl_env/
     deploy_eval.py        Phase 4 — the sim-to-deployment gap measurement
     report.py             Phase 5 — PURE, seed aggregation -> the README tables
     record.py             Phase 5 — one episode -> a top-down GIF (matplotlib Agg)
+    monitor.py            Phase 6 — PURE, every payload the web monitor sends
+    monitor_server.py     Phase 6 — stdlib http.server: page, SSE stream, goal POST
+    monitor_node.py       Phase 6 — the monitor's ROS end (passive + /goal_pose)
   worlds/arena.sdf        10x10 m arena, 7 obstacles, 1 ms physics step
   models/diffbot/         chassis, diff drive, 360-beam LiDAR
   config/bridge.yaml      ros_gz_bridge topic + service mapping
   launch/world.launch.py  headless:=true, paused:=true — training defaults
   launch/deploy.launch.py Phase 4 — the same world with paused:=false
+  launch/monitor.launch.py Phase 6 — deploy.launch.py plus the web monitor
+  web/                    Phase 6 — the page. No build step, no dependencies.
   test/                   test_env.py is @pytest.mark.sim; the rest are pure
 scripts/verify_phase1.sh  text-output verification of the bridge
 scripts/verify_phase2.sh  launches the world, then runs phase2_checks.py
 scripts/phase2_checks.py  Phase 2 exit criteria as PASS/FAIL lines
 scripts/verify_phase4.sh  train tiny -> export -> free-running eval, end to end
+scripts/verify_phase6.sh  the monitor: serves, streams pooled sectors, steers
 ```
 
 
@@ -194,6 +200,8 @@ make board          # TensorBoard over runs/ on :6006
 make verify4        # Phase 4 smoke: train tiny -> export -> free-running eval
 make deploy POLICY=runs/sac-seed0/policy.pt   # unpaused world + inference node
 make gap            # Phase 4 measurement: free-running vs step-synchronized
+make monitor POLICY=runs/sac-seed0/policy.pt   # deployment + http://localhost:8080
+make verify6        # Phase 6 smoke: the monitor serves, streams and steers
 make clean          # rm -rf build install log
 ```
 
@@ -293,6 +301,33 @@ watchdog outright. And it sustains a real-time factor of only 0.3–0.5, which
 means a 20 Hz wall-clock control loop is 40–65 Hz in *sim* time — a confound in
 the headline gap that `deploy_eval` names in its output. The gap number itself
 wants a host that holds RTF near 1.
+
+## Phase 6: the live monitor, and the two rules it lives under
+
+`make monitor POLICY=...` runs the Phase 4 deployment and serves a page on
+:8080 that draws the arena, the robot, the 20 pooled LiDAR sectors, the
+commanded velocities and the observation age. Clicking sends a goal.
+
+Two constraints shape all of it:
+
+- **The browser gets no geometry.** No pooling, no beam angles, no
+  quaternions, no odom→world transform in `web/app.js` — it plots world-frame
+  line segments handed to it by `monitor.py`, which reads the scan through the
+  same `ObservationAssembler` the policy does. This is the same argument as
+  "never reimplement observation preprocessing in `policy_node.py`", applied
+  to a second language, where it would be even harder to notice.
+- **The measurement does not get watched.** `policy_node`'s `status_topic`
+  defaults to empty; `deploy_eval` never sets it and `make gap` launches
+  `deploy.launch.py`, not `monitor.launch.py`. An HTTP server, a browser and
+  20 JSON frames a second on a container that sustains RTF 0.3–0.5 would land
+  in the gap number and not in the picture. Watch a run with the monitor;
+  measure a run without it.
+
+The drawn pose is dead-reckoned from `contract.ROBOT_SPAWN_POSE`, exactly as
+`record.py` does it. Gazebo's true pose is available and is deliberately not
+used: a deployed robot does not have it, and correcting with it would hide the
+drift the policy actually navigates on. The robot sliding off the drawn
+obstacles is the odometry error, not a drawing bug.
 
 ## Working rules
 
