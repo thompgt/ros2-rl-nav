@@ -131,10 +131,11 @@ DiffDrive drives the wheels to zero under its 10 rad/s^2 acceleration limit, so
 8 rad/s (full speed) decays in 0.8 s; 1000 iterations is that plus margin, and
 it settles to a measured 0.000 mm of residual drift.
 
-Why not ``ControlWorld(reset.all)``, which is what CONTRACTS.md asks for
--------------------------------------------------------------------------
-Both failure modes below were measured against Harmonic in this container, not
-inferred:
+Why not ``ControlWorld(reset.all)``
+-----------------------------------
+CONTRACTS.md ("Why reset does not restore the world") specifies braking and
+names reset.all as the thing not to reach for. Both failure modes below were
+measured against Harmonic in this container, not inferred:
 
 1. It is asynchronous. It answers immediately and then swallows the ``set_pose``
    that has to follow it -- never answering that request at all -- roughly half
@@ -153,9 +154,10 @@ would begin in a bit-identical simulator state. Braking leaves the wheels at
 whatever rotation the last episode ended on, and the contact solver amplifies
 that into millimetres of trajectory divergence over tens of steps. Episodes are
 reproducible in their initial state and in the short term, but not bit-identical
-over a full rollout -- a documented deviation from CONTRACTS.md, and the reason
+over a full rollout. That is why CONTRACTS.md's determinism requirement is a
+table of bounds rather than an equality, and why
 ``test_same_seed_and_actions_give_identical_observations`` grades the two
-failure modes separately rather than asserting equality."""
+failure modes separately."""
 
 ROBOT_SPAWN_Z = 0.06
 """Metres. Teleport height, matching the ``<include>`` pose in worlds/arena.sdf.
