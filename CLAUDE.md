@@ -357,18 +357,25 @@ loop, and hand back the TensorBoard scalars or `runs/<algo>-seed<N>/eval.json`
 as text. Three seeds per algorithm before anything is reported. Then
 `make export-policy` and `make gap` fill the sim-to-deployment table.
 
-Four deviations from `CONTRACTS.md` are outstanding and want a human ruling —
-each is documented at the point of deviation, none is a silent divergence:
+**No deviations from `CONTRACTS.md` are outstanding.** Four were, through Phase
+6; all four were ruled on and the document amended, so code and spec now agree
+and any new disagreement is a real one:
 
-1. Reset does not restore the world (`contract.BRAKE_ITERATIONS`).
-2. Episodes are therefore reproducible but not bit-identical
-   (`test_same_seed_and_actions_give_identical_observations`).
-3. `reset(options={"start": ..., "goal": ...})` is an addition to the specified
-   options, needed for a held-out evaluation set (`env.reset`).
-4. `CONTRACTS.md`'s shared-code requirement names only
-   `assemble_observation`. Phase 4 extended the same treatment to the action
-   mapping (`action.scale_action`), on the grounds that the argument for one is
-   verbatim the argument for the other. The document has not been amended —
-   it is authoritative and hand-reviewed, and this is a widening of a rule
-   rather than a departure from one, but it is still a change to what the
-   document says and wants signing off.
+1. Reset brakes and teleports rather than restoring the world — now specified,
+   with the two measured Harmonic failure modes, under "Why reset does not
+   restore the world". `ControlWorld(reset.all)` is named there as the thing
+   not to reach for.
+2. The determinism requirement is a table of bounds rather than bit-equality:
+   the goal encoding at reset is exact, simulated quantities get thresholds
+   stated against the error they catch. `check_env` is therefore stricter than
+   this project's contract, not in conflict with it, and its
+   `check_step_determinism` assertion is xfailed by message.
+3. `reset(options={"start": ..., "goal": ...})` is specified, alongside
+   `goal_radius` and mutually exclusive with it, under "Reset options".
+4. The shared-code requirement covers `action.scale_action` as well as
+   `assemble_observation`, and is stated over transformations on either side of
+   the policy generally — including across languages, which is the Phase 6
+   browser rule.
+
+Amend `CONTRACTS.md` only on a human ruling; it stays authoritative, and code
+still serves it rather than the reverse.
