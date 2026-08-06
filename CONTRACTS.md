@@ -152,7 +152,9 @@ the whole project.
 `reset(seed=None, options=None)` must:
 
 1. Seed a `np.random.Generator` from `seed` via `super().reset(seed=seed)`.
-2. Reset the world to its initial state.
+2. Bring the robot to rest: command zero velocity and advance
+   **1000 physics iterations** (`contract.BRAKE_ITERATIONS`) before teleporting.
+   See "Why reset does not restore the world" below.
 3. Sample a robot pose: `(x, y)` uniform in the arena, yaw uniform in [−π, π],
    rejecting samples closer than **0.4 m** to any obstacle or wall.
 4. Sample a goal `(x, y)` under the same free-space rejection, additionally
@@ -162,6 +164,35 @@ the whole project.
    advance **one** sim step so sensors repopulate, and assemble the first
    observation.
 6. Return `(obs, info)`.
+
+### Why reset does not restore the world
+
+The robot must be at rest when an episode starts, or it inherits momentum from
+the end of the previous one and a fixed seed stops reproducing. The obvious way
+to get that is `ControlWorld(reset.all)` — restore the world, then teleport.
+**Do not use it.** Both failure modes below were measured against Harmonic in
+this project's container, not inferred from documentation:
+
+1. **It is asynchronous.** It answers immediately and then swallows the
+   `set_pose` that has to follow it — never answering that request at all —
+   roughly half the time. No ordering barrier closes the window: `/clock`
+   returns to zero well before the entity manager will accept a pose.
+   Resending the teleport does work, at about 0.4 s per reset.
+2. **Under repeated use it wedges the server.** In a full test run,
+   `/world/arena/control` itself stopped answering after a handful of episodes,
+   and every subsequent call failed on a 10 s service timeout.
+
+(2) is disqualifying for training, which needs thousands of resets. Braking is
+synchronous, needs no barrier, and settles to a measured 0.000 mm of residual
+drift: DiffDrive decays 8 rad/s to zero in 0.8 s under its 10 rad/s²
+acceleration limit, and 1000 iterations is that plus margin.
+
+What this costs is stated rather than hidden. A world reset would also restore
+wheel joint angles, so two identically-seeded episodes would begin in a
+bit-identical simulator state. Braking leaves the wheels at whatever rotation
+the last episode ended on, and the contact solver amplifies that into
+millimetres of trajectory divergence over tens of steps — which is why the
+determinism requirement below is a bound rather than an equality.
 
 **Determinism requirement:** identical `seed` plus an identical action sequence
 must produce a bit-identical observation sequence. This is tested, and it is the
