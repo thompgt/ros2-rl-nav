@@ -194,9 +194,49 @@ the last episode ended on, and the contact solver amplifies that into
 millimetres of trajectory divergence over tens of steps — which is why the
 determinism requirement below is a bound rather than an equality.
 
-**Determinism requirement:** identical `seed` plus an identical action sequence
-must produce a bit-identical observation sequence. This is tested, and it is the
-canary for accidental async leakage into the step loop.
+### Determinism requirement
+
+Identical `seed` plus an identical action sequence must reproduce the episode.
+This is the canary for accidental async leakage into the step loop, and it is
+specified as a **bound**, not an equality, for the reason above.
+
+| Quantity | Requirement |
+|---|---|
+| Goal encoding at reset (obs 20–24) | **Bit-identical.** `np.array_equal` |
+| Distance to goal, per step | max abs difference **< 10 mm** |
+| Goal distance/bearing channels (obs 20–22), per step | max abs difference **< 0.04** |
+
+The goal encoding at reset is computed rather than simulated — pure arithmetic
+over the sampled goal and the reset pose — so it has no excuse to vary, and it
+is asserted exactly. Everything downstream of the physics is bounded instead.
+
+The bounds are chosen against the error they exist to catch, not picked round:
+a one-step timing error while turning at 1.5 rad/s moves the bearing channels
+by ~0.075 per step, against a measured baseline divergence of 0.022 over 30
+steps; one step of travel at full speed covers 20 mm, against a measured
+sub-millimetre settling difference. The distance bound is the primary one — the
+bearing bound is separated from what it catches by only a factor of three.
+
+Two limits of this check, both by construction:
+
+- **Absolute odom poses are not comparable across episodes at all.** Odometry
+  is dead-reckoned and nothing zeroes it, so two episodes start from whatever
+  the odom frame accumulated — measured 360 mm and 0.14 rad apart. That offset
+  is constant for the rollout: the trajectories are the same trajectory,
+  rigidly displaced. The requirement is stated on relative quantities because
+  relative quantities are all the policy sees.
+- **The LiDAR block is excluded.** A single beam grazing an obstacle edge turns
+  a micrometre of pose difference into a full-scale swing in one channel. A
+  bound over those channels would test obstacle-edge geometry, not the step
+  loop.
+- **A *systematic* lag is invisible here** — both rollouts carry it equally.
+  `scripts/phase2_checks.py` measures that directly against an analytic
+  prediction.
+
+`check_env` asserts bit-equality and therefore fails on this deviation. It is
+tolerated **by message** rather than skipped, so that every other conformance
+check it performs — spaces, dtypes, reset signature, info contents, seeding —
+still has to pass, and any new failure still fails.
 
 ### Curriculum hook
 
